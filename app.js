@@ -1,644 +1,437 @@
-// app.js — MVP 熱修穩定版：避免整頁中斷、圖表確保顯示、PH 僅做可數值化檔
+/* =========================================================================
+   國際住宅數據庫 — Home + Topic Router + Definitions Explorer
+   - Hash 路由：#/, #/definitions
+   - 首頁顯示主題卡（部分 Coming soon）
+   - Definitions Explorer：讀 CSV + 搜尋/標籤/比較
+   ======================================================================= */
 
-/***** GitHub 設定 *****/
-const GITHUB_OWNER = "PN0929";
-const GITHUB_REPO  = "globalhousingdata";
-const GITHUB_REF   = "54eb88edd1cab3fcb88c82e0288e93ba87694270";
-const GITHUB_DIR   = "OECD DATA";
+/** CSV 路徑（目前只用於 "各國社宅定義" 主題） */
+const CSV_URL = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
 
-/***** 常數與別名 *****/
-const EXCLUDE_CODES = ["TWN", "Taiwan", "TAIWAN"];
-const COLUMN_ALIASES = {
-  country: ["location","loc","country","country name","country_name","countryname","cou","geo","ref_area","area","economy","countrycode","country code","country_code"],
-  year:    ["time","year","time period","time_period","timeperiod","reference period","ref_period","period","date","ref year","ref_year"],
-  value:   ["value","obs_value","obs value","val","indicator value","data","amount","measure","obs","estimate","est"]
-};
+/** 主題清單（你之後要開新主題，只要把 available 改 true 並在 router 裡加對應渲染器） */
+const TOPICS = [
+  {
+    slug: "definitions",
+    emoji: "🏘️",
+    title: "各國社宅定義",
+    desc: "快速查找、比較各國社會住宅的稱呼與定義",
+    available: true,
+    cta: "開始探索"
+  },
+  {
+    slug: "conditions",
+    emoji: "📊",
+    title: "居住條件（HC）",
+    desc: "面積、人均空間、設備可近性等指標",
+    available: false,
+    cta: "即將推出"
+  },
+  {
+    slug: "market",
+    emoji: "🏠",
+    title: "住宅市場（HM）",
+    desc: "持有/租賃結構、房屋型態、價格與供給",
+    available: false,
+    cta: "即將推出"
+  },
+  {
+    slug: "policy",
+    emoji: "🧩",
+    title: "住宅政策（PH）",
+    desc: "補貼、租金管制、社宅供給、稅務與貸款措施",
+    available: false,
+    cta: "即將推出"
+  }
+];
 
-/***** PH 主題 allowlist（MVP 只視覺化這些）*****/
-const PH_NUMERIC_ALLOWLIST = new Set([
-  "PH2-1-Public-spending-support-to-homebuyers.xlsx",
-  "PH3-1-Public-spending-on-housing-allowances.xlsx",
-  "PH3-3-Recipients-payment-rates-housing-allowances.xlsx",
-  "PH4-1-Public-spending-social-rental-housing.xlsx",
-  "PH4-2-Social-rental-housing-stock.xlsx"
-]);
+/** 快速標籤偵測規則（用於 definitions） */
+const TAG_RULES = [
+  { key: "HasPublicProvider",    label: "公部門提供",     regex: /(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
+  { key: "HasNonProfitProvider", label: "非營利/合作社",   regex: /(non[-\s]?profit|co-?operative|cooperative)/i },
+  { key: "HasBelowMarketRent",   label: "低於市價/租控",    regex: /(below market|rent cap|capped rent|regulated rent|moderate rent)/i },
+  { key: "HasIncomeTargeting",   label: "收入審查/目標族群", regex: /(income limit|low[-\s]?income|vulnerable|eligible|means[-\s]?test)/i },
+  { key: "HasSubsidyOrLoans",    label: "補貼/貸款/稅優惠",  regex: /(subsid(y|ies)|grant(s)?|loan(s)?|tax|preferential rate)/i },
+  { key: "LegalDefined",         label: "法律定義",         regex: /(law|act|defined in law|regulation|legal)/i },
+];
 
-/***** 狀態 *****/
-let currentFilter = "all"; // all | HC | HM | PH
-let allFiles = [];
-let currentFile = null;
-let workbook = null;
+/* ======================  Utility  ====================== */
+const $  = (q, el = document) => el.querySelector(q);
+const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 
-let currentChart = null;
+function escapeHTML(s) {
+  return String(s || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+function shortText(s, n=180) {
+  if (!s) return "";
+  const clean = s.replace(/\s+/g, " ").trim();
+  if (clean.length <= n) return clean;
+  const cut = clean.slice(0, n);
+  const lastDot = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("。"));
+  return (lastDot > 60 ? cut.slice(0, lastDot+1) : cut + "…");
+}
+function csvParse(text) {
+  // Simple CSV parser (handles commas inside quotes)
+  const rows = [];
+  let cur = [], cell = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], n = text[i+1];
+    if (inQ) {
+      if (c === '"' && n === '"') { cell += '"'; i++; }
+      else if (c === '"') { inQ = false; }
+      else { cell += c; }
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === "," ) { cur.push(cell); cell=""; }
+      else if (c === "\n") { cur.push(cell); rows.push(cur); cur=[]; cell=""; }
+      else if (c === "\r") { /* ignore */ }
+      else { cell += c; }
+    }
+  }
+  if (cell || cur.length) { cur.push(cell); rows.push(cur); }
+  return rows;
+}
 
-// 一般模式（HC/HM）
-let rawRows = [];
-let rawKeys = null; // {countryKey, yearKey, valueKey}
-
-// PH 模式（長表）
-let normRows = []; // {country, year|null, value:number}
-let phViewMode = "top"; // top | bottom | all
-
-/***** DOM *****/
-const datasetListEl        = document.getElementById("datasetList");
-const mainChartEl          = document.getElementById("mainChart");
-const dataFiltersEl        = document.getElementById("dataFilters");
-const dataTableEl          = document.getElementById("dataTable");
-const statisticsPanelEl    = document.getElementById("statisticsPanel");
-const chartTypeSelect      = document.getElementById("chartType");
-const downloadBtn          = document.getElementById("downloadBtn");
-const currentDatasetTitleEl= document.getElementById("currentDatasetTitle");
-const welcomeScreenEl      = document.getElementById("welcomeScreen");
-const visualizationAreaEl  = document.getElementById("visualizationArea");
-const lastUpdateEl         = document.getElementById("lastUpdate");
-
-/* 初始化 */
-document.addEventListener("DOMContentLoaded", () => {
-  bindSidebarFilterButtons();
-  loadGitHubList();
-  bindGlobals();
-  setLastUpdateToday();
+/* ======================  Router  ====================== */
+window.addEventListener("DOMContentLoaded", () => {
+  renderRoute();
+  window.addEventListener("hashchange", renderRoute);
 });
 
-/* ---------- 工具：逐段編碼 raw GitHub 下載網址（處理空白/特殊字元） ---------- */
-function buildRawUrl(file) {
-  const encodedPath = file.path.split("/").map(encodeURIComponent).join("/");
-  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${encodedPath}`;
-}
+function renderRoute() {
+  const hash = (location.hash || "#/").replace(/^#/, "");
+  const main = $(".main-content");
+  main.innerHTML = ""; // clear
 
-/* 安全輔助：顯示錯誤訊息在右側 */
-function showError(msg) {
-  ensureVizShown();
-  clearMain();
-  const box = document.createElement("div");
-  box.className = "stat-card";
-  box.style.gridColumn = "1 / -1";
-  box.style.color = "#ef4444";
-  box.textContent = msg || "發生錯誤";
-  statisticsPanelEl.innerHTML = "";
-  statisticsPanelEl.appendChild(box);
-  console.error("[app] ", msg);
-}
-
-/* 顯示可視化區域（確保畫布可用） */
-function ensureVizShown() {
-  if (welcomeScreenEl) welcomeScreenEl.style.display = "none";
-  if (visualizationAreaEl) {
-    visualizationAreaEl.style.display = "block"; // 強制顯示
-    visualizationAreaEl.hidden = false;
-  }
-}
-
-/* 清除主區塊 */
-function clearMain() {
-  if (currentChart) { try { currentChart.destroy(); } catch(e) {} currentChart = null; }
-  if (dataFiltersEl) dataFiltersEl.innerHTML = "";
-  if (dataTableEl) dataTableEl.innerHTML = "";
-  if (statisticsPanelEl) statisticsPanelEl.innerHTML = "";
-}
-
-/* 綁定左側主題按鈕 */
-function bindSidebarFilterButtons() {
-  document.querySelectorAll(".filter-btn").forEach(btn => {
-    if (!btn.dataset.filter) return;
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentFilter = btn.dataset.filter; // all / HC / HM / PH
-      renderDatasetList();
-      clearMain();
-    });
-  });
-}
-
-/* 載入 GitHub 檔案清單 */
-async function loadGitHubList() {
-  if (!datasetListEl) return;
-  datasetListEl.innerHTML = `<div class="loading">載入數據集中…</div>`;
-  try {
-    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(GITHUB_DIR)}?ref=${GITHUB_REF}`;
-    const res = await fetch(apiUrl);
-    if (!res.ok) throw new Error("無法取得 GitHub 資料夾內容");
-    const files = await res.json();
-    allFiles = files.filter(f => f.type === "file" && /\.xlsx?$/i.test(f.name));
-    renderDatasetList();
-  } catch (e) {
-    datasetListEl.innerHTML = `<p style="color:#ef4444">載入失敗：${e.message}</p>`;
-  }
-}
-
-/* 依主題顯示資料集（PH 只顯示 allowlist） */
-function renderDatasetList() {
-  if (!datasetListEl) return;
-  datasetListEl.innerHTML = "";
-  const list = allFiles.filter(f => {
-    if (currentFilter === "all") return true;
-    const up = f.name.toUpperCase();
-    if (currentFilter === "PH") {
-      return up.includes("PH") && PH_NUMERIC_ALLOWLIST.has(f.name);
-    }
-    return up.includes(currentFilter);
-  });
-
-  if (!list.length) {
-    datasetListEl.innerHTML = `<p>這個主題暫無可視覺化指標（MVP 僅先做可數值化者）。</p>`;
-    return;
-  }
-
-  list.forEach(file => {
-    const div = document.createElement("div");
-    div.className = "dataset-item";
-    div.innerHTML = `
-      <div class="dataset-code">${file.name.replace(/\.xlsx?$/i,"")}</div>
-      <div class="dataset-name">${file.path}</div>
-    `;
-    div.addEventListener("click", () => {
-      datasetListEl.querySelectorAll(".dataset-item").forEach(x => x.classList.remove("active"));
-      div.classList.add("active");
-      openDataset(file);
-    });
-    datasetListEl.appendChild(div);
-  });
-}
-
-/* 打開單一 Excel */
-async function openDataset(file) {
-  try {
-    ensureVizShown();
-    clearMain();
-    // 顯示載入中（避免像沒反應）
-    dataFiltersEl.innerHTML = `<div class="loading">正在下載並解析：${file.name} …</div>`;
-
-    const rawUrl = buildRawUrl(file);
-    const res = await fetch(rawUrl);
-    if (!res.ok) throw new Error("下載失敗：" + file.name + "（HTTP " + res.status + "）");
-    const buf = await res.arrayBuffer();
-    workbook = XLSX.read(buf, { type: "array" });
-    currentFile = file;
-
-    const picked = autoPickBestSheet(workbook);
-    if (!picked) {
-      showError("自動偵測不到規則表格（可能為純文字/制度描述）。");
-      return;
-    }
-
-    const longRows = sheetToLong(workbook.Sheets[picked.sheetName], picked.headerIdx, picked.orientation);
-    const cleaned = cleanAndFilterRows(longRows);
-
-    if (!cleaned.length) {
-      showError("這個檔案沒有可用的數值資料（或欄位為純文字/制度描述）。");
-      return;
-    }
-
-    if (currentDatasetTitleEl) currentDatasetTitleEl.textContent = `${file.name.replace(/\.xlsx?$/i,"")}（${picked.sheetName}）`;
-
-    if (currentFilter === "PH") {
-      normRows = cleaned;
-      renderPHControls();
-      renderPHChart();
-      renderPHTableCollapsed();
-    } else {
-      rawRows = rowsFromNormToRaw(cleaned);
-      rawKeys = { countryKey:"Country", yearKey:"Year", valueKey:"Value" };
-      renderGeneralFilters(rawRows, rawKeys);
-      renderGeneralAll();
-    }
-  } catch (e) {
-    showError(e.message || "開啟資料失敗");
-  }
-}
-
-/* ===== 自動偵測：最佳分頁 / 表頭列 / 朝向 ===== */
-function autoPickBestSheet(wb) {
-  let best = null;
-  for (const sheetName of wb.SheetNames) {
-    const sheet = wb.Sheets[sheetName];
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-    if (!matrix || !matrix.length) continue;
-    const maxScan = Math.min(200, matrix.length);
-    for (let i = 0; i < maxScan; i++) {
-      const orient = detectOrientation(matrix, i);
-      if (!orient) continue;
-      const score = estimateHeaderHit(matrix[i]) + Math.log((matrix.length - i + 1) || 1) + (orient === "long" ? 3 : 2);
-      if (!best || score > best.score) best = { sheetName, headerIdx:i, orientation:orient, score };
-    }
-  }
-  return best;
-}
-function detectOrientation(matrix, headerIdx) {
-  const header = (matrix[headerIdx] || []).map(v => v==null ? "" : String(v).trim());
-  const firstCol = matrix.slice(headerIdx+1).map(r => (r && r[0]!=null) ? String(r[0]).trim() : "");
-  const yearCols = header.slice(1).filter(isYearLike).length;
-  const yearRows = firstCol.filter(isYearLike).length;
-
-  const hl = header.map(s=>s.toLowerCase());
-  const hasC = hl.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
-  const hasY = hl.some(lbl => COLUMN_ALIASES.year.some(a=>lbl.includes(a)));
-  const hasV = hl.some(lbl => COLUMN_ALIASES.value.some(a=>lbl.includes(a)));
-  if (hasC && (hasY || yearCols || yearRows) && hasV) return "long";
-
-  if (yearCols >= 3) return "wide-year-in-columns";
-  if (yearRows >= 3) return "wide-year-in-rows";
-  return null;
-}
-function estimateHeaderHit(row) {
-  const labels = (row || []).map(v => v==null ? "" : String(v).trim().toLowerCase());
-  const hasC = labels.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
-  const anyYear = labels.some(isYearLike);
-  return (hasC?1:0) + (anyYear?1:0);
-}
-function isYearLike(x) {
-  const s = String(x||"").trim();
-  const m = s.match(/(18|19|20)\d{2}/);
-  if (!m) return false;
-  const y = Number(m[0]);
-  return y>=1850 && y<=2100;
-}
-
-/* ===== 交叉/長表 → 長表 {country, year, value} ===== */
-function sheetToLong(sheet, headerIdx, orientation) {
-  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const header = (matrix[headerIdx] || []).map(v => v==null ? "" : String(v).trim());
-  const body   = matrix.slice(headerIdx+1);
-
-  if (orientation === "long") {
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, range: headerIdx });
-    return normalizeLong(rows);
-  }
-  if (orientation === "wide-year-in-columns") {
-    const out = [];
-    body.forEach(r => {
-      if (!r || r.length===0) return;
-      const country = safeCell(r[0]);
-      if (!country) return;
-      for (let j=1; j<header.length; j++) {
-        const yl = header[j];
-        if (!isYearLike(yl)) continue;
-        const val = r[j];
-        out.push({ country, year: extractYear(yl), value: val });
-      }
-    });
-    return out;
-  }
-  if (orientation === "wide-year-in-rows") {
-    const countries = header.slice(1);
-    const out = [];
-    body.forEach(r => {
-      if (!r || r.length===0) return;
-      const yl = safeCell(r[0]);
-      if (!isYearLike(yl)) return;
-      const year = extractYear(yl);
-      for (let j=1; j<r.length; j++) {
-        const country = countries[j-1];
-        if (!country) continue;
-        const val = r[j];
-        out.push({ country, year, value: val });
-      }
-    });
-    return out;
-  }
-  return [];
-}
-function normalizeLong(rows) {
-  if (!rows || !rows.length) return [];
-  const cols = Object.keys(rows[0]);
-  const pick = (aliases) => {
-    const low = Object.fromEntries(cols.map(n=>[n.toLowerCase(), n]));
-    for (const a of aliases) if (low[a.toLowerCase()]) return low[a.toLowerCase()];
-    for (const c of cols) { const lc = c.toLowerCase(); if (aliases.some(a=>lc.includes(a.toLowerCase()))) return c; }
-    return null;
-  };
-  let cKey = pick(COLUMN_ALIASES.country);
-  let yKey = pick(COLUMN_ALIASES.year);
-  let vKey = pick(COLUMN_ALIASES.value) || cols.find(k=>k!==cKey && k!==yKey) || cols[1];
-  if (!cKey || !vKey) return [];
-  return rows.map(r => ({ country:r[cKey], year: yKey ? r[yKey] : null, value:r[vKey] }));
-}
-
-/* ===== 清理 / 排除 ===== */
-function safeCell(x){ return x==null ? "" : String(x).trim(); }
-function extractYear(x){ const m = String(x||"").match(/(18|19|20)\d{2}/); return m ? m[0] : null; }
-function toNumberRobust(v) {
-  if (v==null) return null;
-  let s = String(v).trim();
-  s = s.replace(/[a-z\u00AA-\u02AF\u1D2C-\u1D7F\u2070-\u209F]/gi, ""); // 註腳/上標
-  s = s.replace(/[,%\s]/g, ""); // 逗號/空白/百分比
-  if (s==="" || s==="-" ) return null;
-  const n = parseFloat(s);
-  return isNaN(n) ? null : n;
-}
-function cleanAndFilterRows(rows) {
-  const out = (rows||[])
-    .filter(r => r && r.country!=null && r.value!=null && String(r.country).trim()!=="")
-    .map(r => ({ country: r.country, year: r.year ?? null, value: toNumberRobust(r.value) }))
-    .filter(r => r.value!=null)
-    .filter(r => !/^source:|^note:/i.test(String(r.country)))
-    .filter(r => !EXCLUDE_CODES.includes(String(r.country)));
-  return out;
-}
-
-/* ===== PH 極簡模式 ===== */
-function renderPHControls() {
-  if (!dataFiltersEl) return;
-  dataFiltersEl.innerHTML = `
-    <div class="filter-group" id="phControls">
-      <label>顯示集合</label>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-        <button type="button" class="filter-btn ${phViewMode==='top'?'active':''}" data-mode="top">Top 15</button>
-        <button type="button" class="filter-btn ${phViewMode==='bottom'?'active':''}" data-mode="bottom">Bottom 15</button>
-        <button type="button" class="filter-btn ${phViewMode==='all'?'active':''}" data-mode="all">All</button>
-        <button type="button" class="filter-btn" id="toggleTableBtn">展開 / 收合原始表</button>
-      </div>
-    </div>
-  `;
-  dataFiltersEl.querySelectorAll("button[data-mode]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      dataFiltersEl.querySelectorAll("button[data-mode]").forEach(b=>b.classList.remove("active"));
-      btn.classList.add("active");
-      phViewMode = btn.dataset.mode;
-      renderPHChart();
-    });
-  });
-  const tbtn = dataFiltersEl.querySelector("#toggleTableBtn");
-  if (tbtn) tbtn.addEventListener("click", ()=>{
-    const isHidden = dataTableEl.style.display === "none";
-    dataTableEl.style.display = isHidden ? "" : "none";
-  });
-}
-function renderPHChart() {
-  try {
-    const years = Array.from(new Set(normRows.map(r=>r.year).filter(Boolean))).map(Number);
-    const latestYear = years.length ? Math.max(...years) : null;
-
-    let dataset = [];
-    if (latestYear != null) {
-      const map = new Map();
-      normRows.forEach(r => {
-        if (String(r.year) === String(latestYear)) map.set(r.country, r.value);
-      });
-      dataset = Array.from(map.entries()).map(([country,value])=>({country, value}));
-    } else {
-      const map = new Map();
-      normRows.forEach(r => { if (!map.has(r.country)) map.set(r.country, r.value); });
-      dataset = Array.from(map.entries()).map(([country,value])=>({country, value}));
-    }
-
-    dataset.sort((a,b)=>b.value - a.value);
-    let view = dataset;
-    if (phViewMode === "top") view = dataset.slice(0,15);
-    else if (phViewMode === "bottom") view = dataset.slice(-15);
-
-    if (!mainChartEl) { showError("找不到圖表畫布 #mainChart"); return; }
-    const ctx = mainChartEl.getContext("2d");
-    if (!ctx) { showError("無法取得 canvas context"); return; }
-    if (currentChart) { try { currentChart.destroy(); } catch(e) {} }
-
-    const labels = view.map(d=>d.country);
-    const data   = view.map(d=>d.value);
-
-    currentChart = new Chart(ctx, {
-      type: "bar",
-      data: { labels, datasets: [{ label: latestYear? `最新年：${latestYear}`:"最新資料", data, borderWidth:2 }]},
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        indexAxis:"y",
-        scales: { x: { beginAtZero:true } },
-        onClick: (_, el) => {
-          if (!el || !el.length) return;
-          const idx = el[0].index;
-          const country = labels[idx];
-          renderPHDetail(country, latestYear);
-        },
-        plugins: {
-          tooltip: { callbacks: {
-            label: (ctx) => {
-              const v = ctx.parsed.x;
-              return `${ctx.label}: ${isFinite(v)? v : "-"}` + (latestYear? `（${latestYear}）`:"");
-            }
-          } }
-        }
-      }
-    });
-  } catch(err) {
-    showError("繪製政策圖表時發生錯誤：" + err.message);
-  }
-}
-function renderPHDetail(country, latestYear) {
-  const series = normRows.filter(r=>r.country===country && r.year!=null)
-                         .sort((a,b)=>Number(a.year)-Number(b.year));
-  const ys = series.map(r=>Number(r.year));
-  const vs = series.map(r=>r.value);
-  const tYs = ys.length>10 ? ys.slice(-10) : ys;
-  const tVs = vs.length>10 ? vs.slice(-10) : vs;
-
-  let cur = null;
-  if (latestYear!=null) {
-    const f = normRows.find(r=>r.country===country && String(r.year)===String(latestYear));
-    cur = f? f.value : null;
+  // nav active
+  $$(".topnav .nav-link").forEach(a => a.classList.remove("active"));
+  if (hash.startsWith("/definitions")) {
+    $$(".topnav .nav-link").find(a => a.getAttribute("href")==="#/definitions")?.classList.add("active");
+    renderDefinitions(main);
   } else {
-    const f = normRows.find(r=>r.country===country);
-    cur = f? f.value : null;
+    $$(".topnav .nav-link").find(a => a.getAttribute("href")==="#/")?.classList.add("active");
+    renderHome(main);
   }
-  const sameYearRows = latestYear!=null ? normRows.filter(r=>String(r.year)===String(latestYear)) : normRows;
-  const nums = sameYearRows.map(r=>r.value).filter(n=>typeof n==="number" && !isNaN(n));
-  const avg = nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : null;
+}
 
-  let micro = "";
-  if (tYs.length>=2) {
-    const delta = tVs[tVs.length-1] - tVs[0];
-    micro += `近 ${tYs.length} 年 ${delta>=0?"↑":"↓"} ${Math.abs(delta).toFixed(2)}`;
-  }
-  if (avg!=null && cur!=null) {
-    micro += (micro? "，": "") + `相對 OECD 平均 ${ (cur/avg).toFixed(2) } 倍`;
-  }
-
-  if (!statisticsPanelEl) return;
-  statisticsPanelEl.innerHTML = `
-    <div class="stat-card" style="grid-column:1/-1;text-align:left">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-        <div>
-          <div class="stat-label" style="color:#334155">國家 / 地區</div>
-          <div style="font-size:1.25rem;font-weight:700">${country}</div>
-        </div>
-        <div>
-          <div class="stat-label">${latestYear?`數值（${latestYear}）`:"數值"}</div>
-          <div class="stat-value" style="font-size:1.5rem">${cur!=null? cur.toFixed(2): "-"}</div>
-        </div>
-        <div>
-          <div class="stat-label">OECD 平均</div>
-          <div class="stat-value" style="font-size:1.25rem">${avg!=null? avg.toFixed(2): "-"}</div>
-        </div>
-      </div>
-      <div style="margin-top:.75rem"><canvas id="sparklineCanvas" height="60"></canvas></div>
-      <div style="margin-top:.5rem;color:#475569">${micro || "此指標缺乏連續年份，僅顯示最新資料。"}</div>
+/* ======================  Home ====================== */
+function renderHome(root) {
+  const wrap = document.createElement("section");
+  wrap.className = "home fade-in";
+  wrap.innerHTML = `
+    <div class="home-hero">
+      <h2>主題總覽</h2>
+      <p>我們會持續更新更多住宅主題。現在可以先探索「各國社宅定義」。</p>
     </div>
+    <div class="topics" id="topicsGrid"></div>
   `;
+  root.appendChild(wrap);
 
-  const cvs = document.getElementById("sparklineCanvas");
-  if (cvs && tYs.length) {
-    try {
-      new Chart(cvs.getContext("2d"), {
-        type: "line",
-        data: { labels: tYs, datasets: [{ data: tVs, borderWidth:2, pointRadius:0, tension:0.3, fill:false }]},
-        options: {
-          responsive:true, maintainAspectRatio:false,
-          scales:{ x:{display:false}, y:{display:false} },
-          plugins:{ legend:{display:false}, tooltip:{enabled:false} }
-        }
-      });
-    } catch(e) {
-      console.warn("sparkline 失敗：", e);
+  const grid = $("#topicsGrid", wrap);
+  grid.innerHTML = TOPICS.map(t => topicCardHTML(t)).join("");
+  grid.addEventListener("click", e => {
+    const card = e.target.closest(".topic-card");
+    if (!card) return;
+    const slug = card.dataset.slug;
+    const topic = TOPICS.find(tt => tt.slug === slug);
+    if (topic?.available) {
+      location.hash = `#/${slug}`;
     }
-  }
+  });
 }
-function renderPHTableCollapsed() {
-  if (!dataTableEl) return;
-  if (!normRows.length) { dataTableEl.innerHTML = "<p>沒有資料</p>"; return; }
-  const cols = ["country","year","value"];
-  const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>`;
-  const tbody = `<tbody>${normRows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??""}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  dataTableEl.innerHTML = `<table>${thead}${tbody}</table>`;
-  dataTableEl.style.display = "none";
-}
-
-/* ===== 一般模式（HC/HM）===== */
-function rowsFromNormToRaw(rows) { return rows.map(r=>({ Country:r.country, Year:r.year, Value:r.value })); }
-function renderGeneralFilters(rows, keys) {
-  if (!dataFiltersEl) return;
-  dataFiltersEl.innerHTML = "";
-  // 國家
-  const countries = Array.from(new Set(rows.map(r=>r[keys.countryKey]).filter(Boolean))).sort();
-  const cg = document.createElement("div");
-  cg.className = "filter-group";
-  cg.innerHTML = `
-    <label for="filterCountry">國家 / 地區</label>
-    <select id="filterCountry">
-      <option value="__all">全部</option>
-      ${countries.map(c=>`<option value="${c}">${c}</option>`).join("")}
-    </select>
+function topicCardHTML(t) {
+  const cls = `topic-card ${t.available ? "available" : "coming"}`;
+  return `
+    <article class="${cls}" data-slug="${t.slug}">
+      <span class="topic-badge">${t.available ? "" : "即將推出"}</span>
+      <div class="topic-emoji">${t.emoji}</div>
+      <div class="topic-title">${escapeHTML(t.title)}</div>
+      <div class="topic-desc">${escapeHTML(t.desc)}</div>
+      <div class="topic-actions">
+        <button class="btn ${t.available ? "primary" : ""}">
+          ${t.cta}
+        </button>
+      </div>
+    </article>
   `;
-  dataFiltersEl.appendChild(cg);
-  cg.querySelector("select").addEventListener("change", renderGeneralAll);
+}
 
-  // 年份
-  const years = Array.from(new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean))).sort();
-  if (years.length) {
-    const yg = document.createElement("div");
-    yg.className = "filter-group";
-    yg.innerHTML = `
-      <label for="filterYear">年份</label>
-      <select id="filterYear">
-        <option value="__all">全部</option>
-        ${years.map(y=>`<option value="${y}">${y}</option>`).join("")}
-      </select>
+/* ======================  Definitions Explorer ====================== */
+const DefState = {
+  data: [],
+  filtered: [],
+  selectedTags: new Set(),
+  selectedCountry: "ALL",
+  searchText: "",
+  compareSet: new Set(),
+};
+
+async function renderDefinitions(root) {
+  const section = document.createElement("section");
+  section.id = "definitionsExplorer";
+  section.innerHTML = `
+    <div class="controls fade-in">
+      <div class="searchbox">
+        <input id="searchInput" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" />
+      </div>
+      <div class="selectbox">
+        <select id="countrySelect"></select>
+      </div>
+      <div class="tags" id="tagBar"></div>
+    </div>
+
+    <div id="cardsWrap" class="cards fade-in"></div>
+
+    <div id="emptyState" class="empty" style="display:none;">
+      找不到符合條件的結果，換個關鍵字或取消一些標籤看看～
+    </div>
+
+    <aside id="compareDrawer" class="compare-drawer">
+      <div class="compare-title">比較（最多 3 國）</div>
+      <div id="compareList"></div>
+      <div class="compare-actions">
+        <button class="btn" id="btnClearCompare">清空</button>
+        <button class="btn primary" id="btnCopyCompare">複製摘要</button>
+      </div>
+    </aside>
+  `;
+  root.appendChild(section);
+
+  await loadDefinitionsCSV();
+  buildDefControls();
+  renderDefAll();
+}
+
+async function loadDefinitionsCSV() {
+  try {
+    const resp = await fetch(CSV_URL, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    const rows = csvParse(text);
+    if (!rows.length) throw new Error("CSV 空白");
+    const headers = rows[0].map(h => h.trim());
+    const idxCountry = headers.findIndex(h => /country/i.test(h));
+    const idxTerms   = headers.findIndex(h => /terms?used/i.test(h));
+    const idxDef     = headers.findIndex(h => /definition/i.test(h));
+    if (idxCountry < 0 || idxDef < 0) throw new Error("缺少必要欄位 (Country/Definition)");
+
+    const data = rows.slice(1).map(r => {
+      const country = (r[idxCountry] || "").trim();
+      const terms   = (idxTerms >= 0 ? r[idxTerms] : "" ) || "";
+      const def     = (r[idxDef] || "").trim();
+      const flags = {};
+      const textForMatch = `${terms}\n${def}`;
+      TAG_RULES.forEach(rule => flags[rule.key] = rule.regex.test(textForMatch));
+      return {
+        Country: country,
+        TermsUsed: terms,
+        Definition: def,
+        short: shortText(def, 200),
+        flags
+      };
+    }).filter(d => d.Country && d.Definition);
+
+    DefState.data = data;
+    DefState.filtered = data.slice();
+  } catch (err) {
+    $("#cardsWrap").innerHTML = `
+      <div class="empty">
+        無法讀取 CSV（${err.message}）。<br/>
+        請確認檔案位於 <code>${CSV_URL}</code>。
+      </div>
     `;
-    dataFiltersEl.appendChild(yg);
-    yg.querySelector("select").addEventListener("change", renderGeneralAll);
   }
 }
-function renderGeneralAll() {
-  if (!rawRows.length || !rawKeys) return;
-  const cSel = document.getElementById("filterCountry");
-  const ySel = document.getElementById("filterYear");
-  const sc = cSel ? cSel.value : "__all";
-  const sy = ySel ? ySel.value : "__all";
-  const rows = rawRows.filter(r => {
-    if (sc !== "__all" && r[rawKeys.countryKey] !== sc) return false;
-    if (sy !== "__all" && String(r[rawKeys.yearKey]) !== String(sy)) return false;
+
+function buildDefControls() {
+  const uniqueCountries = Array.from(new Set(DefState.data.map(d => d.Country))).sort((a,b)=>a.localeCompare(b));
+  const sel = $("#countrySelect");
+  sel.innerHTML = `<option value="ALL">全部國家</option>` + uniqueCountries.map(c => `<option>${escapeHTML(c)}</option>`).join("");
+  sel.addEventListener("change", e => {
+    DefState.selectedCountry = e.target.value;
+    applyDefFilters();
+  });
+
+  $("#searchInput").addEventListener("input", e => {
+    DefState.searchText = e.target.value.trim();
+    applyDefFilters();
+  });
+
+  const tagBar = $("#tagBar");
+  tagBar.innerHTML = TAG_RULES.map(t =>
+    `<button class="tag" data-key="${t.key}">${t.label}</button>`
+  ).join("");
+  tagBar.addEventListener("click", e => {
+    const btn = e.target.closest(".tag");
+    if (!btn) return;
+    const key = btn.dataset.key;
+    if (DefState.selectedTags.has(key)) DefState.selectedTags.delete(key);
+    else DefState.selectedTags.add(key);
+    btn.classList.toggle("active");
+    applyDefFilters();
+  });
+
+  $("#btnClearCompare").addEventListener("click", () => {
+    DefState.compareSet.clear();
+    renderDefCompare();
+    $$(".card input[type='checkbox']").forEach(cb => (cb.checked = false));
+  });
+  $("#btnCopyCompare").addEventListener("click", copyDefCompare);
+}
+
+function applyDefFilters() {
+  const q = DefState.searchText.toLowerCase();
+  DefState.filtered = DefState.data.filter(d => {
+    if (DefState.selectedCountry !== "ALL" && d.Country !== DefState.selectedCountry) return false;
+    for (const key of DefState.selectedTags) if (!d.flags[key]) return false;
+    if (q) {
+      const hay = (d.Country + " " + d.TermsUsed + " " + d.Definition).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
-  renderGeneralChart(rows, rawKeys);
-  renderGeneralTable(rows);
-  renderGeneralStats(rows, rawKeys.valueKey);
+  renderDefCards();
 }
-function renderGeneralChart(rows, keys) {
-  try {
-    if (!mainChartEl) { showError("找不到圖表畫布 #mainChart"); return; }
-    const ctx = mainChartEl.getContext("2d");
-    if (!ctx) { showError("無法取得 canvas context"); return; }
-    if (currentChart) { try { currentChart.destroy(); } catch(e) {} }
 
-    let typeSel = chartTypeSelect ? chartTypeSelect.value : "auto";
-    if (typeSel === "horizontalBar") typeSel = "bar-horizontal";
-    if (typeSel === "auto") {
-      const uniqY = new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean));
-      typeSel = uniqY.size > 3 ? "line" : "bar";
-    }
-    const isHorizontal = typeSel === "bar-horizontal";
+function renderDefAll() {
+  renderDefCards();
+  renderDefCompare();
+}
 
-    const uniqC = Array.from(new Set(rows.map(r=>r[keys.countryKey]).filter(Boolean)));
-    const uniqY = keys.yearKey ? Array.from(new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean))).sort() : [];
-
-    let labels=[], data=[];
-    if (keys.yearKey && uniqC.length === 1) {
-      labels = uniqY;
-      data   = labels.map(y => {
-        const f = rows.find(r=>String(r[keys.yearKey])===String(y));
-        return f ? Number(f[keys.valueKey]) : null;
-      });
-    } else {
-      labels = uniqC;
-      data   = labels.map(c=>{
-        const cs = rows.filter(r=>r[keys.countryKey]===c);
-        if (keys.yearKey) {
-          const last = cs.sort((a,b)=>Number(a[keys.yearKey])-Number(b[keys.yearKey])).at(-1);
-          return last ? Number(last[keys.valueKey]) : null;
-        } else {
-          return cs[0] ? Number(cs[0][keys.valueKey]) : null;
-        }
-      });
-    }
-
-    currentChart = new Chart(ctx, {
-      type: isHorizontal ? "bar" : typeSel,
-      data: { labels, datasets:[{ label:"Value", data, borderWidth:2, fill:false }]},
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        indexAxis: isHorizontal ? "y" : "x",
-        scales: { y: { beginAtZero:true } }
-      }
-    });
-  } catch(err) {
-    showError("繪製一般圖表時發生錯誤：" + err.message);
+function renderDefCards() {
+  const wrap = $("#cardsWrap");
+  const empty = $("#emptyState");
+  if (!DefState.filtered.length) {
+    wrap.innerHTML = "";
+    empty.style.display = "block";
+    return;
   }
+  empty.style.display = "none";
+
+  wrap.innerHTML = DefState.filtered.map((d, idx) => defCardHTML(d, idx)).join("");
+  wrap.addEventListener("click", onDefCardClick, { once: true });
 }
-function renderGeneralTable(rows) {
-  if (!dataTableEl) return;
-  if (!rows.length) { dataTableEl.innerHTML = "<p>沒有符合篩選條件的資料。</p>"; return; }
-  const cols = Object.keys(rows[0]);
-  const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>`;
-  const tbody = `<tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??""}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  dataTableEl.innerHTML = `<table>${thead}${tbody}</table>`;
-}
-function renderGeneralStats(rows, valueKey) {
-  if (!statisticsPanelEl) return;
-  if (!rows.length) { statisticsPanelEl.innerHTML = ""; return; }
-  const nums = rows.map(r=>Number(r[valueKey])).filter(n=>!isNaN(n));
-  const count= nums.length;
-  const min  = Math.min(...nums);
-  const max  = Math.max(...nums);
-  const avg  = nums.reduce((a,b)=>a+b,0)/(nums.length||1);
-  statisticsPanelEl.innerHTML = `
-    <div class="stat-card"><div class="stat-label">資料筆數</div><div class="stat-value">${count}</div></div>
-    <div class="stat-card"><div class="stat-label">最大值</div><div class="stat-value">${isFinite(max)?max.toFixed(2):"-"}</div></div>
-    <div class="stat-card"><div class="stat-label">最小值</div><div class="stat-value">${isFinite(min)?min.toFixed(2):"-"}</div></div>
-    <div class="stat-card"><div class="stat-label">平均值</div><div class="stat-value">${isFinite(avg)?avg.toFixed(2):"-"}</div></div>
+
+function defCardHTML(d, idx) {
+  const chips = TAG_RULES
+    .filter(t => d.flags[t.key])
+    .slice(0, 3)
+    .map(t => `<span class="chip">${t.label}</span>`)
+    .join("");
+
+  const checked = DefState.compareSet.has(d.Country) ? "checked" : "";
+  const safeCountry = escapeHTML(d.Country);
+  const safeTerms   = escapeHTML(d.TermsUsed || "—");
+  const safeShort   = escapeHTML(d.short);
+  const safeFull    = escapeHTML(d.Definition);
+
+  return `
+    <article class="card" data-idx="${idx}">
+      <div class="card-header">
+        <div>
+          <div class="country">${safeCountry}</div>
+          <div class="terms">${safeTerms}</div>
+        </div>
+        <label class="mini">
+          <input type="checkbox" class="cmp" data-country="${safeCountry}" ${checked} />
+          加入比較
+        </label>
+      </div>
+      <div class="summary">${safeShort}</div>
+      <div class="actions">
+        <button class="btn toggle">展開全文</button>
+        <div class="chips">${chips}</div>
+      </div>
+      <div class="fulltext" style="display:none;">${safeFull}</div>
+    </article>
   `;
 }
 
-/* ===== 通用：下載、更新時間 ===== */
-function bindGlobals() {
-  if (downloadBtn) downloadBtn.addEventListener("click", () => {
-    if (!currentChart) return;
-    const a = document.createElement("a");
-    a.href = currentChart.toBase64Image();
-    a.download = (currentFile ? currentFile.name.replace(/\.xlsx?$/i,"") : "chart") + ".png";
-    a.click();
-  });
+function onDefCardClick(e) {
+  const btn = e.target.closest(".toggle");
+  const cmp = e.target.closest("input.cmp");
+  if (btn) {
+    const card = e.target.closest(".card");
+    const full = $(".fulltext", card);
+    const open = full.style.display !== "none";
+    full.style.display = open ? "none" : "block";
+    btn.textContent = open ? "展開全文" : "收合全文";
+  } else if (cmp) {
+    const country = cmp.dataset.country;
+    if (cmp.checked) {
+      if (DefState.compareSet.size >= 3) {
+        cmp.checked = false;
+        alert("一次最多比較 3 個國家");
+        return;
+      }
+      DefState.compareSet.add(country);
+    } else {
+      DefState.compareSet.delete(country);
+    }
+    renderDefCompare();
+  }
+  $("#cardsWrap").addEventListener("click", onDefCardClick, { once: true });
 }
-function setLastUpdateToday() {
-  if (!lastUpdateEl) return;
-  const now = new Date();
-  lastUpdateEl.textContent = now.toISOString().slice(0,10);
-  lastUpdateEl.setAttribute("datetime", now.toISOString());
+
+function renderDefCompare() {
+  const drawer = $("#compareDrawer");
+  const list = $("#compareList");
+  const arr = Array.from(DefState.compareSet);
+
+  if (!arr.length) {
+    drawer.classList.remove("open");
+    list.innerHTML = `<div class="mini" style="color:#64748b;">尚未選擇國家。勾選卡片右上「加入比較」。</div>`;
+    return;
+  }
+  drawer.classList.add("open");
+
+  const items = arr.map((c) => {
+    const d = DefState.data.find(x => x.Country === c);
+    const bullets = deriveDefBullets(d).map(b => `• ${escapeHTML(b)}`).join("<br>");
+    return `
+      <div class="compare-item">
+        <h4>${escapeHTML(d.Country)}</h4>
+        <div class="mini"><strong>稱呼：</strong>${escapeHTML(d.TermsUsed || "—")}</div>
+        <div class="mini" style="margin-top:4px">${bullets}</div>
+      </div>
+    `;
+  }).join("");
+
+  list.innerHTML = items;
+}
+
+function deriveDefBullets(d) {
+  const out = [];
+  if (d.flags.HasPublicProvider) out.push("由公部門/地方政府提供或管理");
+  if (d.flags.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
+  if (d.flags.HasBelowMarketRent) out.push("租金低於市價或受管制");
+  if (d.flags.HasIncomeTargeting) out.push("針對低收入/弱勢族群，需收入審查");
+  if (d.flags.HasSubsidyOrLoans) out.push("提供補貼/貸款/稅務優惠等支持");
+  if (d.flags.LegalDefined) out.push("有法律/法規上的明確定義");
+  if (!out.length) out.push(shortText(d.Definition, 120));
+  return out.slice(0, 5);
+}
+
+async function copyDefCompare() {
+  try {
+    const arr = Array.from(DefState.compareSet);
+    if (!arr.length) return;
+    const blocks = arr.map(c => {
+      const d = DefState.data.find(x => x.Country === c);
+      const lines = [
+        `國家：${d.Country}`,
+        `稱呼：${d.TermsUsed || "—"}`,
+        `重點：${deriveDefBullets(d).join("；")}`,
+      ];
+      return lines.join("\n");
+    });
+    await navigator.clipboard.writeText(blocks.join("\n\n"));
+    alert("已複製比較摘要！");
+  } catch {
+    alert("複製失敗，請手動選取文字。");
+  }
 }
