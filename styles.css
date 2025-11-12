@@ -104,13 +104,6 @@ header h1 {
   transition: var(--transition);
 }
 
-.sidebar.collapsed {
-  width: 0;
-  padding: 0;
-  overflow: hidden;
-  border-right: none;
-}
-
 .category-section,
 .dataset-section {
   margin-bottom: 2rem;
@@ -125,7 +118,6 @@ header h1 {
   gap: 0.5rem;
 }
 
-/* Filter Buttons */
 .filter-buttons {
   display: flex;
   flex-direction: column;
@@ -193,10 +185,6 @@ header h1 {
 .dataset-item .dataset-name {
   font-size: 0.8rem;
   opacity: 0.9;
-}
-
-.dataset-item.hidden {
-  display: none;
 }
 
 /* ========== CONTENT ========== */
@@ -310,20 +298,13 @@ header h1 {
   align-items: center;
 }
 
-.chart-controls label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-weight: 500;
-}
-
 .chart-controls select {
   padding: 0.5rem 0.85rem;
   border: 1.5px solid var(--border-color);
   border-radius: 6px;
   font-size: 0.95rem;
-  cursor: pointer;
   background: white;
+  cursor: pointer;
 }
 
 .btn-download {
@@ -343,12 +324,26 @@ header h1 {
   box-shadow: var(--shadow);
 }
 
-/* Data Filters */
+/* Filters + Insight */
 .data-filters {
   background: white;
   padding: 1.25rem 1.5rem;
   border-radius: 12px;
   box-shadow: var(--shadow);
+}
+
+.insight-box {
+  background: #eff6ff;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.insight-box h4 {
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+  color: #1d4ed8;
 }
 
 .filter-group {
@@ -381,11 +376,7 @@ header h1 {
   position: relative;
 }
 
-#mainChart {
-  max-height: 460px;
-}
-
-/* Data Table */
+/* Table */
 .data-table-container {
   background: white;
   padding: 1.25rem 1.5rem;
@@ -430,7 +421,7 @@ tbody tr:hover {
   background: var(--hover-bg);
 }
 
-/* Statistics Panel */
+/* Stats */
 .statistics-panel {
   background: white;
   padding: 1.25rem 1.5rem;
@@ -448,19 +439,19 @@ tbody tr:hover {
   text-align: center;
 }
 
-.stat-card .stat-label {
+.stat-label {
   font-size: 0.85rem;
   color: var(--text-secondary);
   margin-bottom: 0.35rem;
 }
 
-.stat-card .stat-value {
+.stat-value {
   font-size: 1.75rem;
   font-weight: 700;
   color: var(--primary-color);
 }
 
-/* ========== FOOTER ========== */
+/* Footer */
 footer {
   background: var(--dark-bg);
   color: white;
@@ -469,7 +460,7 @@ footer {
   margin-top: auto;
 }
 
-/* ========== LOADING ========== */
+/* Loading */
 .loading {
   text-align: center;
   padding: 1.25rem 0;
@@ -477,7 +468,7 @@ footer {
   font-size: 0.9rem;
 }
 
-/* ========== RESPONSIVE ========== */
+/* Responsive */
 @media (max-width: 1024px) {
   .sidebar-toggle {
     display: block;
