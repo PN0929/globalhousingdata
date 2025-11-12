@@ -2,114 +2,36 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OECD 全球住宅數據可視化平台</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>國際住宅數據庫</title>
   <link rel="stylesheet" href="styles.css" />
-  <!-- xlsx & chart.js -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <meta name="description" content="國際住宅數據庫：探索各國住宅政策、居住條件、房市指標與社宅制度定義" />
 </head>
 <body>
   <div class="container">
     <header>
-      <button class="sidebar-toggle" id="sidebarToggle">☰</button>
-      <h1>🏘️ OECD 全球住宅數據可視化平台</h1>
-      <p class="subtitle">互動式數據分析與視覺化展示</p>
+      <h1>🏙️ 國際住宅數據庫</h1>
+      <p class="subtitle">探索各國住宅政策、居住條件、房市指標與社宅制度</p>
+      <nav class="topnav">
+        <a href="#/" class="nav-link" data-route="home">首頁</a>
+        <a href="#/definitions" class="nav-link">各國社宅定義</a>
+        <!-- 其他主題開放後可加在這裡 -->
+      </nav>
     </header>
 
-    <div class="main-content">
-      <!-- 左側主題＋資料集 -->
-      <aside class="sidebar" aria-label="住宅主題與資料集">
-        <section class="category-section">
-          <h3>📚 住宅主題</h3>
-          <div class="filter-buttons" id="topicList">
-            <!-- JS 會塞主題 -->
-          </div>
-        </section>
-
-        <section class="dataset-section">
-          <h3>📁 選擇指標 / 資料集</h3>
-          <div id="datasetList" class="dataset-list" aria-live="polite">
-            <div class="loading">載入數據集中…</div>
-          </div>
-        </section>
-      </aside>
-
-      <!-- 右側內容 -->
-      <main class="content" id="mainContent">
-        <!-- 歡迎頁 -->
-        <section class="welcome-screen" id="welcomeScreen">
-          <div class="welcome-content">
-            <h2>歡迎使用 OECD 住宅數據可視化平台</h2>
-            <p>這裡整理了 OECD 的住宅相關指標，讓你用主題的方式來看數據，不需要先懂代碼。</p>
-            <div class="features">
-              <article class="feature">
-                <span class="icon">🧭</span>
-                <h4>主題導向</h4>
-                <p>先選「住宅負擔」、「住宅市場」再挑指標</p>
-              </article>
-              <article class="feature">
-                <span class="icon">📈</span>
-                <h4>自動圖表</h4>
-                <p>依照指標型態自動選常見圖表</p>
-              </article>
-              <article class="feature">
-                <span class="icon">💡</span>
-                <h4>觀察重點</h4>
-                <p>告訴你這個指標可以看什麼</p>
-              </article>
-            </div>
-            <p class="instruction">👈 請先從左側選一個「住宅主題」，再選一個指標開始探索</p>
-          </div>
-        </section>
-
-        <!-- 可視化區 -->
-        <section class="visualization-area" id="visualizationArea" hidden>
-          <header class="controls-bar">
-            <h2 id="currentDatasetTitle">指標標題</h2>
-            <div class="chart-controls">
-              <label for="chartType">圖表類型:</label>
-              <select id="chartType" name="chartType">
-                <option value="auto">自動選擇</option>
-                <option value="line">折線圖</option>
-                <option value="bar">柱狀圖</option>
-                <option value="bar-horizontal">橫向柱狀圖</option>
-                <option value="radar">雷達圖</option>
-                <option value="pie">圓餅圖</option>
-              </select>
-              <button id="downloadBtn" class="btn-download" type="button">📥 下載圖表</button>
-            </div>
-          </header>
-
-          <!-- Insight 區塊 -->
-          <section class="data-filters" id="dataFilters" aria-label="篩選條件與說明">
-            <div id="insightBox" class="insight-box">
-              <!-- JS 會塞主題/指標說明 -->
-            </div>
-            <!-- 篩選器會塞在這裡 -->
-          </section>
-
-          <!-- 圖表 -->
-          <div class="chart-container">
-            <canvas id="mainChart" aria-label="住宅數據圖表" role="img"></canvas>
-          </div>
-
-          <!-- 表格 -->
-          <section class="data-table-container" aria-label="資料表格">
-            <h3>📋 住宅相關指標原始資料</h3>
-            <div class="table-wrapper" id="dataTable"></div>
-          </section>
-
-          <!-- 統計 -->
-          <section class="statistics-panel" id="statisticsPanel" aria-label="統計資訊"></section>
-        </section>
-      </main>
-    </div>
+    <div class="main-content"><!-- 由 app.js 動態渲染 --></div>
 
     <footer>
-      <p>數據來源: OECD Affordable Housing Database | 最後更新: <time id="lastUpdate"></time></p>
+      <p>
+        資料來源：
+        <a href="https://github.com/PN0929/globalhousingdata/tree/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data" target="_blank" rel="noopener">
+          GitHub / data
+        </a>
+        ｜此站為教學與研究用途，將持續更新主題
+      </p>
     </footer>
   </div>
+
+  <script src="app.js"></script>
 </body>
 </html>
