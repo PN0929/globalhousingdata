@@ -1,124 +1,114 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OECD 全球房屋數據可視化平台</title>
-  <link rel="stylesheet" href="styles.css">
-  <!-- 第三方套件 -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OECD 全球住宅數據可視化平台</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- xlsx & chart.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
-  <!-- 你的主程式 -->
   <script src="app.js" defer></script>
-  <button class="sidebar-toggle" id="sidebarToggle">☰</button>
 </head>
 <body>
   <div class="container">
-    <header class="site-header">
-      <h1>🏘️ OECD 全球房屋數據可視化平台</h1>
+    <header>
+      <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+      <h1>🏘️ OECD 全球住宅數據可視化平台</h1>
       <p class="subtitle">互動式數據分析與視覺化展示</p>
     </header>
 
     <div class="main-content">
-      <!-- 側欄 -->
-      <aside class="sidebar" aria-label="資料篩選">
+      <!-- 左側主題＋資料集 -->
+      <aside class="sidebar" aria-label="住宅主題與資料集">
         <section class="category-section">
-          <h2 class="section-title">📊 數據類別</h2>
-          <div class="filter-buttons" role="list">
-            <button class="filter-btn active" data-filter="all" type="button">全部顯示</button>
-            <button class="filter-btn" data-filter="HC" type="button">住房條件 (HC)</button>
-            <button class="filter-btn" data-filter="HM" type="button">住房市場 (HM)</button>
-            <button class="filter-btn" data-filter="PH" type="button">公共政策 (PH)</button>
+          <h3>📚 住宅主題</h3>
+          <div class="filter-buttons" id="topicList">
+            <!-- JS 會塞主題 -->
           </div>
         </section>
 
         <section class="dataset-section">
-          <h2 class="section-title">📁 選擇數據集</h2>
+          <h3>📁 選擇指標 / 資料集</h3>
           <div id="datasetList" class="dataset-list" aria-live="polite">
             <div class="loading">載入數據集中…</div>
           </div>
         </section>
       </aside>
 
-      <!-- 主內容 -->
+      <!-- 右側內容 -->
       <main class="content" id="mainContent">
         <!-- 歡迎頁 -->
-        <section class="welcome-screen is-active" id="welcomeScreen" aria-label="歡迎頁">
+        <section class="welcome-screen" id="welcomeScreen">
           <div class="welcome-content">
-            <h2>歡迎使用 OECD 房屋數據可視化平台</h2>
-            <p>本平台提供 OECD 全球房屋數據的互動式可視化分析。</p>
+            <h2>歡迎使用 OECD 住宅數據可視化平台</h2>
+            <p>這裡整理了 OECD 的住宅相關指標，讓你用主題的方式來看數據，不需要先懂代碼。</p>
             <div class="features">
               <article class="feature">
+                <span class="icon">🧭</span>
+                <h4>主題導向</h4>
+                <p>先選「住宅負擔」、「住宅市場」再挑指標</p>
+              </article>
+              <article class="feature">
                 <span class="icon">📈</span>
-                <h3>互動圖表</h3>
-                <p>點擊圖表元素查看詳細數據。</p>
+                <h4>自動圖表</h4>
+                <p>依照指標型態自動選常見圖表</p>
               </article>
               <article class="feature">
-                <span class="icon">🔍</span>
-                <h3>多維度分析</h3>
-                <p>按國家、年份、指標篩選。</p>
-              </article>
-              <article class="feature">
-                <span class="icon">📊</span>
-                <h3>多種圖表類型</h3>
-                <p>折線圖、柱狀圖、雷達圖等。</p>
+                <span class="icon">💡</span>
+                <h4>觀察重點</h4>
+                <p>告訴你這個指標可以看什麼</p>
               </article>
             </div>
-            <p class="instruction">👈 請從左側選擇一個數據集開始探索</p>
+            <p class="instruction">👈 請先從左側選一個「住宅主題」，再選一個指標開始探索</p>
           </div>
         </section>
 
-        <!-- 可視化頁 -->
+        <!-- 可視化區 -->
         <section class="visualization-area" id="visualizationArea" hidden>
           <header class="controls-bar">
-            <h2 id="currentDatasetTitle">數據集標題</h2>
+            <h2 id="currentDatasetTitle">指標標題</h2>
             <div class="chart-controls">
-              <label for="chartType">
-                圖表類型:
-              </label>
+              <label for="chartType">圖表類型:</label>
               <select id="chartType" name="chartType">
+                <option value="auto">自動選擇</option>
                 <option value="line">折線圖</option>
                 <option value="bar">柱狀圖</option>
                 <option value="bar-horizontal">橫向柱狀圖</option>
                 <option value="radar">雷達圖</option>
                 <option value="pie">圓餅圖</option>
-                <option value="doughnut">甜甜圈圖</option>
               </select>
               <button id="downloadBtn" class="btn-download" type="button">📥 下載圖表</button>
             </div>
           </header>
 
-          <!-- 動態篩選器 -->
-          <div class="data-filters" id="dataFilters" aria-label="資料篩選列">
-            <!-- JS 動態插入 -->
-          </div>
+          <!-- Insight 區塊 -->
+          <section class="data-filters" id="dataFilters" aria-label="篩選條件與說明">
+            <div id="insightBox" class="insight-box">
+              <!-- JS 會塞主題/指標說明 -->
+            </div>
+            <!-- 篩選器會塞在這裡 -->
+          </section>
 
           <!-- 圖表 -->
           <div class="chart-container">
-            <canvas id="mainChart" aria-label="資料圖表" role="img"></canvas>
+            <canvas id="mainChart" aria-label="住宅數據圖表" role="img"></canvas>
           </div>
 
           <!-- 表格 -->
           <section class="data-table-container" aria-label="資料表格">
-            <h3>📋 數據表格</h3>
-            <div class="table-wrapper" id="dataTable">
-              <!-- JS 動態插入表格 -->
-            </div>
+            <h3>📋 住宅相關指標原始資料</h3>
+            <div class="table-wrapper" id="dataTable"></div>
           </section>
 
           <!-- 統計 -->
-          <section class="statistics-panel" id="statisticsPanel" aria-label="統計資訊">
-            <!-- JS 動態插入統計 -->
-          </section>
+          <section class="statistics-panel" id="statisticsPanel" aria-label="統計資訊"></section>
         </section>
       </main>
     </div>
 
-    <footer class="site-footer">
-      <p>
-        數據來源: OECD Affordable Housing Database |
-        最後更新: <time id="lastUpdate" datetime=""></time>
-      </p>
+    <footer>
+      <p>數據來源: OECD Affordable Housing Database | 最後更新: <time id="lastUpdate"></time></p>
     </footer>
   </div>
 </body>
