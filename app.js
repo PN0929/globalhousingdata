@@ -1,17 +1,20 @@
 /* =========================================================================
-   國際住宅數據庫 — Home + 路由 + 兩主題互連
+   國際住宅數據庫 — Home + 路由 + 三主題互連
    - #/definitions  社宅定義（多筆同國合併）
    - #/eligibility  社宅申請資格（矩陣 / 卡片）
+   - #/reassessment 資格重新審查頻率（表格）
    ======================================================================= */
 
-/** 資料位置（你也可改指向 main 分支最新檔案） */
-const CSV_DEFINITIONS = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
-const CSV_ELIGIBILITY = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
+/** 資料位置（若你改動路徑，改這三個變數即可） */
+const CSV_DEFINITIONS  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+const CSV_ELIGIBILITY  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
+const CSV_REASSESSMENT = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
 
-/** 主題清單（首頁卡片） */
+/** 首頁主題卡 */
 const TOPICS = [
-  { slug: "definitions", emoji: "🏘️", title: "各國社宅定義", desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
-  { slug: "eligibility", emoji: "🧾", title: "社宅申請資格", desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" }
+  { slug: "definitions",  emoji: "🏘️", title: "各國社宅定義",   desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
+  { slug: "eligibility",  emoji: "🧾", title: "社宅申請資格",   desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
+  { slug: "reassessment", emoji: "🔄", title: "資格重新審查頻率", desc: "租戶多久需要重新審查？各國規定與備註",       available: true,  cta: "查看頻率" }
 ];
 
 /* ============ 小工具 ============ */
@@ -29,6 +32,18 @@ function csvParse(text){
   if(cell||cur.length){cur.push(cell);rows.push(cur);}
   return rows;
 }
+function getQueryParams(hash){
+  // 將 #/reassessment?country=Japan 解析 query
+  const qIndex = hash.indexOf("?");
+  const out = {};
+  if(qIndex === -1) return out;
+  const q = hash.slice(qIndex+1);
+  q.split("&").forEach(kv=>{
+    const [k,v] = kv.split("=");
+    out[decodeURIComponent(k||"")] = decodeURIComponent((v||"").replace(/\+/g," "));
+  });
+  return out;
+}
 
 /* ============ 路由 ============ */
 window.addEventListener("DOMContentLoaded", () => {
@@ -37,7 +52,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 function setActive(route){
   $$(".topnav .nav-link").forEach(a=>a.classList.remove("active"));
-  const m = route.replace(/^#\//,"") || "";
+  const m = route.replace(/^#\//,"").split("?")[0] || "";
   const el = $(`.topnav .nav-link[data-route="${m||'home'}"]`); if(el) el.classList.add("active");
 }
 function renderRoute(){
@@ -47,6 +62,7 @@ function renderRoute(){
 
   if(hash.startsWith("/definitions")) renderDefinitions(main);
   else if(hash.startsWith("/eligibility")) renderEligibility(main);
+  else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else renderHome(main);
 }
 
@@ -79,7 +95,7 @@ function renderHome(root){
 }
 
 /* =========================================================================
-   社宅定義（沿用你之前版本：同國合併、展開全文、加入比較）
+   社宅定義（同國合併、展開全文、加入比較 → 已有）
    ======================================================================= */
 const TAG_RULES = [
   { key:"HasPublicProvider",    label:"公部門提供",     regex:/(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
@@ -99,7 +115,10 @@ async function renderDefinitions(root){
       <div class="searchbox"><input id="def_search" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" /></div>
       <div class="selectbox"><select id="def_country"></select></div>
       <div class="tags" id="def_tags"></div>
-      <div class="modebox"><a class="btn" href="#/eligibility">→ 前往申請資格</a></div>
+      <div class="modebox">
+        <a class="btn" href="#/eligibility">→ 申請資格</a>
+        <a class="btn" href="#/reassessment">→ 再審查頻率</a>
+      </div>
     </div>
     <div id="def_cards" class="cards fade-in"></div>
     <div id="def_empty" class="empty" style="display:none;">找不到符合條件的結果</div>
@@ -218,7 +237,8 @@ function renderDefCards(){
         </div>
         <div class="fulltext" style="display:none;">${variants}</div>
         <div class="actions" style="margin-top:8px">
-          <a class="btn" href="#/eligibility">→ 查看此國家申請資格</a>
+          <a class="btn" href="#/eligibility">→ 查看申請資格</a>
+          <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.Country)}">→ 該國再審查頻率</a>
         </div>
       </article>`;
   }).join("");
@@ -269,7 +289,7 @@ function deriveDefBullets(d){
 /* =========================================================================
    申請資格（Eligibility）— 矩陣 + 卡片 + 搜尋/篩選
    ======================================================================= */
-const EliState = { raw:[], view:"matrix", search:"", filters:new Set(["All","Inc","PR","Res","Emp"]) }; // 開站先顯示全部欄位
+const EliState = { raw:[], view:"matrix", search:"" };
 
 async function renderEligibility(root){
   const sec=document.createElement("section");
@@ -295,7 +315,8 @@ async function renderEligibility(root){
         <button class="tag" data-q="CitizenshipOrPR:Yes">需公民/PR</button>
         <button class="tag" data-q="LocalResidency:Yes">需在地居住</button>
         <button class="tag" data-q="Employment:Yes">需就業</button>
-        <a class="btn" href="#/definitions">← 回到社宅定義</a>
+        <a class="btn" href="#/definitions">← 社宅定義</a>
+        <a class="btn" href="#/reassessment">→ 再審查頻率</a>
       </div>
     </div>
 
@@ -346,7 +367,6 @@ function bindEligibilityControls(){
     const t=e.target.closest(".tag"); if(!t) return;
     const [k,v]=t.dataset.q.split(":"); // 欄位:Yes
     const sel = $("#eli_search"); sel.value = ""; EliState.search="";
-    // 單一條件快速過濾：把非 NA 且等於 v 的留下
     EliState.quick = { key:k, val:v };
     renderEligibilityView();
   });
@@ -361,17 +381,16 @@ function filterEligibility(data){
       if(!hay.includes(q)) return false;
     }
     if(quick){
-      const val = d[shortKey(quick.key)];
+      const mapKey = {AllEligible:"All",IncomeThreshold:"Inc",CitizenshipOrPR:"PR",LocalResidency:"Res",Employment:"Emp"};
+      const val = d[mapKey[quick.key] || quick.key];
       if(!val || val.toUpperCase()!==quick.val.toUpperCase()) return false;
     }
     return true;
   });
 }
-function shortKey(k){ return ({AllEligible:"All",IncomeThreshold:"Inc",CitizenshipOrPR:"PR",LocalResidency:"Res",Employment:"Emp"})[k] || k; }
 function sortEligibility(arr){
   const how = $("#eli_sort").value;
   if(how==="score"){
-    // Yes = 1（為限制/門檻），No/NA=0；分數高表示條件多
     const score = d => ["Inc","PR","Res","Emp"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0), 0);
     arr.sort((a,b)=>score(b)-score(a) || a.cn.localeCompare(b.cn));
   }else{
@@ -427,7 +446,8 @@ function renderMatrix(data){
       </table>
     </div>
     <div class="actions" style="margin:10px 0">
-      <a class="btn" href="#/definitions">← 回到社宅定義</a>
+      <a class="btn" href="#/definitions">← 社宅定義</a>
+      <a class="btn" href="#/reassessment">→ 再審查頻率</a>
     </div>
   `;
 }
@@ -449,9 +469,143 @@ function renderEliCards(data){
           <div class="fulltext" style="margin-top:10px">${escapeHTML(d.Note||"") || "<span class='note'>—</span>"}</div>
           <div class="actions" style="margin-top:10px">
             <a class="btn" href="#/definitions">查看定義</a>
+            <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.cn)}">查看再審查頻率</a>
           </div>
         </article>
       `).join("")}
+    </div>
+  `;
+}
+
+/* =========================================================================
+   再審查頻率（Reassessment）— 表格 + 搜尋 + 互連
+   ======================================================================= */
+const ReaState = { raw:[], search:"", sort:"az", preselectCountry:null };
+
+async function renderReassessment(root, params={}){
+  ReaState.preselectCountry = params.country || null;
+
+  const sec=document.createElement("section");
+  sec.id="reassessment";
+  sec.innerHTML = `
+    <div class="home-hero" style="margin-top:20px;">
+      <h2>資格重新審查頻率（Re-assessment）</h2>
+      <p class="note">各國社宅租戶多久需要重新審查？若國家內分不同制度（如波蘭），會以「Segment」標示。</p>
+    </div>
+
+    <div class="controls fade-in">
+      <div class="searchbox"><input id="rea_search" type="text" placeholder="搜尋國家、頻率或敘述…" /></div>
+      <div class="selectbox">
+        <select id="rea_sort">
+          <option value="az">排序：國名 A→Z</option>
+          <option value="freq">排序：頻率類型</option>
+        </select>
+      </div>
+      <div class="modebox">
+        <a class="btn" href="#/eligibility">← 申請資格</a>
+        <a class="btn" href="#/definitions">→ 社宅定義</a>
+      </div>
+    </div>
+
+    <div id="rea_mount" class="fade-in"></div>
+    <div id="rea_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
+  `;
+  root.appendChild(sec);
+
+  await loadReassessment();
+  bindReassessmentControls();
+  renderReassessmentTable();
+}
+
+async function loadReassessment(){
+  const resp = await fetch(CSV_REASSESSMENT,{cache:"no-store"});
+  const text = await resp.text();
+  const rows = csvParse(text);
+  const h = rows[0].map(x=>x.trim());
+  const idx = (name)=>h.findIndex(k=>k.toLowerCase()===name.toLowerCase());
+
+  const m = {
+    Country: idx("Country"),
+    Segment: idx("Segment"),
+    CountryNormalized: idx("Country_Normalized"),
+    Freq: idx("StandardizedFrequency"),
+    Detail: idx("Detail"),
+  };
+  ReaState.raw = rows.slice(1).map(r=>({
+    c: (r[m.Country]||"").trim(),
+    seg: (r[m.Segment]||"").trim(),
+    cn: (r[m.CountryNormalized]||"").trim() || (r[m.Country]||"").trim(),
+    freq: (r[m.Freq]||"").trim(),
+    detail: (r[m.Detail]||"").trim()
+  })).filter(x=>x.c);
+
+  // 如果帶了 ?country= 參數，自動放到搜尋框
+  if(ReaState.preselectCountry){
+    ReaState.search = ReaState.preselectCountry.toLowerCase();
+    const input = $("#rea_search"); if(input){ input.value = ReaState.preselectCountry; }
+  }
+}
+
+function bindReassessmentControls(){
+  $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
+  $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
+}
+
+function filterReassessment(data){
+  const q = ReaState.search;
+  if(!q) return data;
+  return data.filter(d=>{
+    const hay = [d.c,d.seg,d.cn,d.freq,d.detail].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+}
+function sortReassessment(arr){
+  if(ReaState.sort==="freq"){
+    const order = ["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
+    const score = v => {
+      const i = order.indexOf(v);
+      return i === -1 ? 999 : i;
+    };
+    arr.sort((a,b)=> score(a.freq) - score(b.freq) || a.cn.localeCompare(b.cn));
+  }else{
+    arr.sort((a,b)=> a.cn.localeCompare(b.cn));
+  }
+}
+
+function renderReassessmentTable(){
+  const mount=$("#rea_mount"), empty=$("#rea_empty");
+  let data = filterReassessment(ReaState.raw.slice());
+  sortReassessment(data);
+
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; }
+  empty.style.display="none";
+
+  mount.innerHTML = `
+    <div class="matrix">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Country</th>
+            <th>Segment</th>
+            <th>Frequency</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(d=>`
+            <tr>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
+              <td>${escapeHTML(d.seg || "—")}</td>
+              <td>${escapeHTML(d.freq || "—")}</td>
+              <td class="note">${escapeHTML(d.detail || "")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="actions" style="margin:10px 0">
+      <a class="btn" href="#/eligibility">← 回到申請資格</a>
+      <a class="btn" href="#/definitions">→ 查看社宅定義</a>
     </div>
   `;
 }
