@@ -1,0 +1,32 @@
+﻿Country,Country_Normalized,RentSetting_MarketBased,RentSetting_CostBased,RentSetting_IncomeBased,RentSetting_UtilityBased,RentIncrease_Regular,RentIncrease_NotRegular,SocialRentPctOfMarket,SittingTenantRightToBuy_Norm,SittingTenantRightToBuy_Notes
+Australia (1),Australia,NO,NO,YES,NO,YES,NO,,Depending on regulation at level of States and Territories.,Depending on regulation at level of States and Territories.
+Austria (2),Austria,NO,YES,NO,NO,YES,NO,72 % (Vienna) (2022),From limited-profit housing associations under certain conditions  .,From limited-profit housing associations under certain conditions  .
+Bulgaria (3),Bulgaria,NO,NO,YES,NO,NO,YES,Not available,No,
+Canada (3),Canada,YES,NO,YES,NO,YES,NO,Not available,No,
+Colombia (3),Colombia,YES,NO,YES,NO,YES,NO,Not available,Yes (conditions),"Yes, but only applies to new dwellings at beginning of rental contract."
+Czechia,Czechia,YES,YES,YES,YES,YES,NO,50% (Prague) (2022),No,
+Denmark,Denmark,NO,YES,NO,NO,NO,YES,57% (Copenhagen) (2020),No,
+Estonia (1),Estonia,NO,YES,NO,YES,YES,NO,15% (Tallinn) (2020),No,
+Finland,Finland,NO,YES,NO,NO,YES,NO,67% (Helsinki)  (2023),No,
+"France (1,3)",France,NO,YES,YES,NO,YES,NO,Not available,No,
+Germany,Germany,YES,NO,YES,NO,YES,NO,Not available,No,
+Iceland,Iceland,YES,YES,NO,YES,YES,NO,Not available,No,
+Ireland (4),Ireland,NO,NO,YES,NO,YES,NO,Not available,Yes,
+"Israel (1,5,7)",Israel,YES,NO,NO,YES,YES,NO,Not available,No,
+Italy (3),Italy,YES,NO,YES,YES,YES,NO,Not available,Yes (conditions),"Yes, but under specific conditions and only for a percentage of the social housing stock owned by public entities."
+Japan (5),Japan,YES,YES,YES,YES,NO,YES,Not available,No,
+Latvia (1),Latvia,YES,YES,YES,YES,YES,NO,Not available,No,
+Varies across municipalities Lithuania,Varies across municipalities Lithuania,NO,NO,NO,YES,YES,NO,Not available,No (with notes),"No, but a tenant who has lived for five years in a social dwelling is eligible to apply for housing purchase if the municipal council decides to rent that dwelling as municipal housing at market prices."
+Luxembourg (6),Luxembourg,NO,NO,YES,YES,YES,NO,Not available,No,
+Malta,Malta,YES,YES,YES,YES,YES,NO,Not available,Yes,
+"The Netherlands (1,5)",Netherlands,YES,YES,YES,YES,YES,NO,Not applicable (about 90% of the rental sector applies regulated rents),Yes (conditions),"Yes, if the housing corporation decides to sell."
+New Zealand (1),New Zealand,YES,NO,YES,NO,YES,NO,44% (Wellington) (2020),"Only in some circumstances, but not in areas where the demand for public housing is high.","Only in some circumstances, but not in areas where the demand for public housing is high."
+Norway (3),Norway,YES,NO,NO,NO,YES,NO,Not available,No,
+Peru,Peru,YES,YES,YES,YES,NO,YES,Not available,No,
+Poland (7),Poland,YES,NO,NO,NO,NO,YES,16% (Warsaw) (2022),"Only if landlord intends to sell dwelling. In the case of municipal housing, when the municipality decides to sell. In the case of TBS, when TBS agrees to sell.","Only if landlord intends to sell dwelling. In the case of municipal housing, when the municipality decides to sell. In the case of TBS, when TBS agrees to sell."
+Portugal (7),Portugal,NO,NO,YES,NO,NO,YES,Not available,Yes (conditions),"Yes, but there is no formal law regulating this right."
+Slovak Republic,Slovak Republic,NO,YES,NO,NO,NO,YES,25% (Bratislava) (2022),No,
+Slovenia,Slovenia,NO,YES,NO,YES,YES,NO,31% (Ljubljana) (2022),No,
+South Africa (5),South Africa,YES,YES,YES,YES,YES,NO,Not available,No,
+"United Kingdom: England (3,8)",United Kingdom (England),YES,NO,YES,YES,YES,NO,Not available,Some are eligible to buy at discounted price.,Some are eligible to buy at discounted price.
+"United States   (1,5)",United States,YES,YES,YES,NO,YES,NO,Not available,No (with notes),"No. However, there are some small programmes which permit this, such as the Section 5(h) Homeownership Program."
