@@ -1,5 +1,5 @@
 /* =========================================================================
-   國際住宅數據庫 — 路由 + 五主題互連（超耐髒 CSV 解析）
+   國際住宅數據庫 — 路由 + 五主題互連（超耐髒 CSV 解析 + 強韌搜尋）
    - #/definitions     社宅定義
    - #/eligibility     申請資格
    - #/reassessment    再審查頻率
@@ -23,8 +23,7 @@ function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(
 /** CSV 解析（支援 UTF-8 BOM、引號內逗號、雙引號跳脫） */
 function csvParse(text){
   if (!text) return [];
-  // 去掉 BOM
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // 去 BOM
   const rows=[]; let cur=[],cell="",inQ=false;
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
@@ -43,22 +42,16 @@ function csvParse(text){
   return rows;
 }
 
-/** 標頭正規化成耐髒 key（移除非字母與數字，全小寫） */
-function normKey(s){
-  return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,"");
-}
-
-/** 用同義別名找欄位 index（headers: 第一列原始標頭陣列） */
+/** 標頭正規化成耐髒 key（移除非字母數字，全小寫） */
+function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+/** 用同義別名找欄位 index */
 function idxByAliases(headers, aliases){
   const keys = headers.map(h => normKey(h));
-  for (const a of aliases){
-    const i = keys.indexOf(a);
-    if (i !== -1) return i;
-  }
+  for (const a of aliases){ const i = keys.indexOf(a); if (i !== -1) return i; }
   return -1;
 }
 
-/** 取得查詢字串物件 */
+/** 查詢字串 */
 function getQueryParams(hash){
   const qIndex = hash.indexOf("?"); const out = {};
   if(qIndex === -1) return out;
@@ -70,12 +63,25 @@ function getQueryParams(hash){
   return out;
 }
 
-/** YES/NO/NA 藥丸 */
+/** YES/NO/NA 標籤 */
 function pill(v){
   const x = String(v||"NA").trim().toUpperCase();
   if(x==="YES") return `<span class="pill y">YES</span>`;
   if(x==="NO")  return `<span class="pill n">NO</span>`;
   return `<span class="pill na">NA</span>`;
+}
+
+/** 強韌搜尋正規化：去重音、轉小寫、把非字母數字全部換成單一空白 */
+function normSearch(s){
+  return String(s||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"") // 去重音
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")                      // 標點/符號→空白
+    .trim();
+}
+/** 產生 query 參數用的「溫和正規化國名」：僅把多餘空白壓成單一空白 */
+function countryParam(name){
+  return encodeURIComponent(String(name||"").replace(/\s+/g," ").trim());
 }
 
 /* ============ 路由 ============ */
@@ -93,10 +99,10 @@ function renderRoute(){
   const main = $(".main-content"); main.innerHTML = "";
   setActive(hash);
 
-  if(hash.startsWith("/definitions"))    renderDefinitions(main);
-  else if(hash.startsWith("/eligibility")) renderEligibility(main);
+  if(hash.startsWith("/definitions"))       renderDefinitions(main);
+  else if(hash.startsWith("/eligibility"))  renderEligibility(main);
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
-  else if(hash.startsWith("/priority"))  renderPriority(main, getQueryParams(hash));
+  else if(hash.startsWith("/priority"))     renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
   else renderHome(main);
 }
@@ -262,14 +268,13 @@ function renderDefCards(){
         <div class="fulltext" style="display:none;">${variants}</div>
         <div class="actions" style="margin-top:8px">
           <a class="btn" href="#/eligibility">→ 申請資格</a>
-          <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.Country)}">→ 再審查頻率</a>
-          <a class="btn" href="#/priority?country=${encodeURIComponent(d.Country)}">→ 優先分配</a>
-          <a class="btn" href="#/characteristics?country=${encodeURIComponent(d.Country)}">→ 社宅特徵</a>
+          <a class="btn" href="#/reassessment?country=${countryParam(d.Country)}">→ 再審查頻率</a>
+          <a class="btn" href="#/priority?country=${countryParam(d.Country)}">→ 優先分配</a>
+          <a class="btn" href="#/characteristics?country=${countryParam(d.Country)}">→ 社宅特徵</a>
         </div>
       </article>`;
   }).join("");
 
-  // 展開全文
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
     if(btn){
@@ -441,9 +446,9 @@ function renderEligibilityView(){
           <div class="fulltext" style="margin-top:10px">${escapeHTML(d.Note||"")||"<span class='note'>—</span>"}</div>
           <div class="actions" style="margin-top:10px">
             <a class="btn" href="#/definitions">查看定義</a>
-            <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.cn)}">再審查頻率</a>
-            <a class="btn" href="#/priority?country=${encodeURIComponent(d.cn)}">優先分配</a>
-            <a class="btn" href="#/characteristics?country=${encodeURIComponent(d.cn)}">社宅特徵</a>
+            <a class="btn" href="#/reassessment?country=${countryParam(d.cn)}">再審查頻率</a>
+            <a class="btn" href="#/priority?country=${countryParam(d.cn)}">優先分配</a>
+            <a class="btn" href="#/characteristics?country=${countryParam(d.cn)}">社宅特徵</a>
           </div>
         </article>`).join("")}
     </div>`;
@@ -502,13 +507,7 @@ async function loadReassessment(){
   ReaState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c=get(col.Country); if(!c) return null;
-    return {
-      c,
-      seg:get(col.Segment),
-      cn:get(col.CountryNormalized)||c,
-      freq:get(col.Freq),
-      detail:get(col.Detail)
-    };
+    return { c, seg:get(col.Segment), cn:get(col.CountryNormalized)||c, freq:get(col.Freq), detail:get(col.Detail) };
   }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
@@ -520,7 +519,7 @@ function bindReassessmentControls(){
 
 function filterReassessment(d){
   const q=ReaState.search; if(!q) return d;
-  return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].join(" ").toLowerCase().includes(q));
+  return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].map(normSearch).join(" | ").includes(normSearch(q)));
 }
 
 function sortReassessment(arr){
@@ -660,8 +659,8 @@ function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
     if(q){
-      const hay=[d.c,d.cn,d.Wait,d.Income,d.Dis,d.Eld,d.Asy,d.Eth,d.HH,d.Cond,d.Note].join(" ").toLowerCase();
-      if(!hay.includes(q)) return false;
+      const hay=[d.c,d.cn,d.Wait,d.Income,d.Dis,d.Eld,d.Asy,d.Eth,d.HH,d.Cond,d.Note].map(normSearch).join(" | ");
+      if(!hay.includes(normSearch(q))) return false;
     }
     if(quick){
       const mapKey = {Disability:"Dis",Elderly:"Eld",EthnicOrRacialMinority:"Eth",CurrentHousingConditions:"Cond"};
@@ -730,7 +729,7 @@ function renderPriorityTable(){
 }
 
 /* =========================================================================
-   社宅特徵（8 旗標 + 百分比 + 承租戶購屋權）
+   社宅特徵（8 旗標 + 百分比 + 承租戶購屋權）— 強韌搜尋與退回策略
    ======================================================================= */
 const ChaState = { raw:[], search:"", sort:"az", preselectCountry:null };
 
@@ -760,6 +759,7 @@ async function renderCharacteristics(root, params={}){
       </div>
     </div>
 
+    <div id="cha_notice" class="empty" style="display:none;"></div>
     <div id="cha_mount" class="fade-in"></div>
     <div id="cha_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
@@ -767,6 +767,13 @@ async function renderCharacteristics(root, params={}){
 
   await loadCharacteristics();
   bindCharacteristicsControls();
+
+  // 若從 ?country= 帶入，先設定搜尋框
+  if(ChaState.preselectCountry){
+    const ip = $("#cha_search"); if(ip) ip.value = ChaState.preselectCountry;
+    ChaState.search = ChaState.preselectCountry;
+  }
+
   renderCharacteristicsTable();
 }
 
@@ -811,20 +818,19 @@ async function loadCharacteristics(){
       BuyNote:get(col.BuyNote,"")
     };
   }).filter(Boolean);
-
-  if(ChaState.preselectCountry){ ChaState.search=ChaState.preselectCountry.toLowerCase(); const input=$("#cha_search"); if(input) input.value=ChaState.preselectCountry; }
 }
 
 function bindCharacteristicsControls(){
-  $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim().toLowerCase(); renderCharacteristicsTable();});
+  $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
 
 function filterCharacteristics(data){
-  const q=ChaState.search;
-  if(!q) return data;
+  const qRaw = ChaState.search;
+  if(!qRaw) return data;
+  const q = normSearch(qRaw);
   return data.filter(d=>{
-    const hay=[d.c,d.cn,d.MB,d.CB,d.IB,d.UB,d.IncReg,d.IncNot,d.Pct,d.Buy,d.BuyNote].join(" ").toLowerCase();
+    const hay = [d.c,d.cn,d.MB,d.CB,d.IB,d.UB,d.IncReg,d.IncNot,d.Pct,d.Buy,d.BuyNote].map(normSearch).join(" | ");
     return hay.includes(q);
   });
 }
@@ -837,9 +843,28 @@ function sortCharacteristics(arr){
 }
 
 function renderCharacteristicsTable(){
-  const mount=$("#cha_mount"), empty=$("#cha_empty");
-  let data = filterCharacteristics(ChaState.raw.slice()); sortCharacteristics(data);
-  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
+  const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice");
+  let data = filterCharacteristics(ChaState.raw.slice());
+  sortCharacteristics(data);
+
+  // 若帶入 country 但 0 筆 → 顯示提示並退回全部
+  if((!data.length) && ChaState.search){
+    const total = ChaState.raw.length;
+    notice.style.display="block";
+    notice.textContent = `找不到完全符合「${ChaState.search}」的結果，已顯示全部（共 ${total} 筆）。`;
+    data = ChaState.raw.slice();
+    sortCharacteristics(data);
+  }else{
+    notice.style.display="none";
+    notice.textContent="";
+  }
+
+  if(!data.length){
+    mount.innerHTML="";
+    empty.style.display="block";
+    empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）";
+    return;
+  }
   empty.style.display="none";
 
   mount.innerHTML = `
