@@ -60,6 +60,12 @@ document.addEventListener("DOMContentLoaded", () => {
   setLastUpdateToday();
 });
 
+/* ---------- 工具：逐段編碼 raw GitHub 下載網址（處理空白/特殊字元） ---------- */
+function buildRawUrl(file) {
+  const encodedPath = file.path.split("/").map(encodeURIComponent).join("/");
+  return `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${encodedPath}`;
+}
+
 /* 安全輔助：顯示錯誤訊息在右側 */
 function showError(msg) {
   ensureVizShown();
@@ -78,8 +84,8 @@ function showError(msg) {
 function ensureVizShown() {
   if (welcomeScreenEl) welcomeScreenEl.style.display = "none";
   if (visualizationAreaEl) {
-    visualizationAreaEl.style.display = "block";     // 強制 block
-    visualizationAreaEl.hidden = false;              // 同步 hidden 狀態
+    visualizationAreaEl.style.display = "block"; // 強制顯示
+    visualizationAreaEl.hidden = false;
   }
 }
 
@@ -158,9 +164,14 @@ function renderDatasetList() {
 /* 打開單一 Excel */
 async function openDataset(file) {
   try {
-    const rawUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${file.path}`;
+    ensureVizShown();
+    clearMain();
+    // 顯示載入中（避免像沒反應）
+    dataFiltersEl.innerHTML = `<div class="loading">正在下載並解析：${file.name} …</div>`;
+
+    const rawUrl = buildRawUrl(file);
     const res = await fetch(rawUrl);
-    if (!res.ok) throw new Error("下載失敗：" + file.name);
+    if (!res.ok) throw new Error("下載失敗：" + file.name + "（HTTP " + res.status + "）");
     const buf = await res.arrayBuffer();
     workbook = XLSX.read(buf, { type: "array" });
     currentFile = file;
@@ -179,7 +190,6 @@ async function openDataset(file) {
       return;
     }
 
-    ensureVizShown();
     if (currentDatasetTitleEl) currentDatasetTitleEl.textContent = `${file.name.replace(/\.xlsx?$/i,"")}（${picked.sheetName}）`;
 
     if (currentFilter === "PH") {
