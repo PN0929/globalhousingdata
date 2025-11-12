@@ -1,373 +1,257 @@
-/* =========================================================================
-   Social Housing Definitions Explorer (MVP)
-   - Reads CSV (Country, TermsUsed, Definition)
-   - Search, Tag filters, Country select
-   - Expand/collapse cards
-   - Compare up to 3 countries with copy summary
-   No third-party libs required.
-   ======================================================================= */
+/* ===============  Base Reset  =============== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-/** 👉 CSV 路徑已改為你提供的固定 commit raw 連結 */
-const CSV_URL = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+:root {
+  /* Palette — teal/blue, calm & clean */
+  --bg-gradient-start: #e6fffb;   /* light teal */
+  --bg-gradient-end:   #e6f7ff;   /* very light blue */
+  --brand:             #0ea5a5;   /* teal-600 */
+  --brand-700:         #0b8d8d;
+  --brand-50:          #e6fffb;
+  --accent:            #3b82f6;   /* blue-500 */
+  --accent-700:        #2563eb;
+  --ok:                #10b981;   /* emerald */
+  --warn:              #f59e0b;   /* amber */
+  --danger:            #ef4444;   /* red */
+  --ink:               #0f172a;   /* slate-900 */
+  --ink-2:             #334155;   /* slate-700 */
+  --muted:             #64748b;   /* slate-500 */
+  --line:              #e2e8f0;   /* slate-200 */
+  --card:              #ffffff;
 
-/** 快速標籤的偵測關鍵字（很 MVP 的規則即可） */
-const TAG_RULES = [
-  { key: "HasPublicProvider",    label: "公部門提供",     regex: /(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
-  { key: "HasNonProfitProvider", label: "非營利/合作社",   regex: /(non[-\s]?profit|co-?operative|cooperative)/i },
-  { key: "HasBelowMarketRent",   label: "低於市價/租控",    regex: /(below market|rent cap|capped rent|regulated rent|moderate rent)/i },
-  { key: "HasIncomeTargeting",   label: "收入審查/目標族群", regex: /(income limit|low[-\s]?income|vulnerable|eligible|means[-\s]?test)/i },
-  { key: "HasSubsidyOrLoans",    label: "補貼/貸款/稅優惠",  regex: /(subsid(y|ies)|grant(s)?|loan(s)?|tax|preferential rate)/i },
-  { key: "LegalDefined",         label: "法律定義",         regex: /(law|act|defined in law|regulation|legal)/i },
-];
-
-/* ======================  Utility  ====================== */
-const $ = (q, el = document) => el.querySelector(q);
-const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
-
-function csvParse(text) {
-  // Simple CSV parser (handles commas inside quotes)
-  const rows = [];
-  let cur = [], cell = "", inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], n = text[i+1];
-    if (inQ) {
-      if (c === '"' && n === '"') { cell += '"'; i++; }
-      else if (c === '"') { inQ = false; }
-      else { cell += c; }
-    } else {
-      if (c === '"') inQ = true;
-      else if (c === "," ) { cur.push(cell); cell=""; }
-      else if (c === "\n") { cur.push(cell); rows.push(cur); cur=[]; cell=""; }
-      else if (c === "\r") { /* ignore */ }
-      else { cell += c; }
-    }
-  }
-  if (cell || cur.length) { cur.push(cell); rows.push(cur); }
-  return rows;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .06);
+  --shadow:    0 6px 18px rgba(2, 132, 199, .10);
+  --radius-sm: 10px;
+  --radius:    14px;
+  --radius-lg: 18px;
 }
 
-function shortText(s, n=180) {
-  if (!s) return "";
-  const clean = s.replace(/\s+/g, " ").trim();
-  if (clean.length <= n) return clean;
-  const cut = clean.slice(0, n);
-  const lastDot = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("。"));
-  return (lastDot > 60 ? cut.slice(0, lastDot+1) : cut + "…");
+html, body { height: 100%; }
+
+body {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang TC", "Microsoft JhengHei", "Heiti TC", sans-serif;
+  color: var(--ink);
+  line-height: 1.65;
+  background: linear-gradient(160deg, var(--bg-gradient-start), var(--bg-gradient-end));
 }
 
-/* ======================  State  ====================== */
-const State = {
-  data: [],          // {Country, TermsUsed, Definition, flags{}, short}
-  filtered: [],
-  selectedTags: new Set(),  // TAG_RULES.key
-  selectedCountry: "ALL",
-  searchText: "",
-  compareSet: new Set(),    // country names
-};
-
-/* ======================  Bootstrap  ====================== */
-document.addEventListener("DOMContentLoaded", async () => {
-  ensureExplorerShell();      // create Explorer DOM
-  await loadCSV();            // fetch & parse data
-  buildControls();            // search + select + tags
-  renderAll();                // cards + drawer
-});
-
-/* ======================  Shell DOM  ====================== */
-function ensureExplorerShell() {
-  const main = document.querySelector(".main-content") || document.body;
-  // 清空舊有內容的可視區域（保留 header/footer）
-  const oldWelcome = $("#welcomeScreen"); if (oldWelcome) oldWelcome.remove();
-  const oldViz = $("#visualizationArea"); if (oldViz) oldViz.remove();
-
-  // Explorer container
-  const wrap = document.createElement("section");
-  wrap.id = "definitionsExplorer";
-  wrap.innerHTML = `
-    <div class="controls fade-in">
-      <div class="searchbox">
-        <input id="searchInput" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" />
-      </div>
-      <div class="selectbox">
-        <select id="countrySelect"></select>
-      </div>
-      <div class="tags" id="tagBar">
-        <!-- dynamic tag chips -->
-      </div>
-    </div>
-
-    <div id="cardsWrap" class="cards fade-in"></div>
-
-    <div id="emptyState" class="empty" style="display:none;">
-      找不到符合條件的結果，換個關鍵字或取消一些標籤看看～
-    </div>
-
-    <aside id="compareDrawer" class="compare-drawer">
-      <div class="compare-title">比較（最多 3 國）</div>
-      <div id="compareList"></div>
-      <div class="compare-actions">
-        <button class="btn" id="btnClearCompare">清空</button>
-        <button class="btn primary" id="btnCopyCompare">複製摘要</button>
-      </div>
-    </aside>
-  `;
-  main.prepend(wrap);
+/* ===============  Page Shell  =============== */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 40px;
 }
 
-/* ======================  Load CSV  ====================== */
-async function loadCSV() {
-  try {
-    const resp = await fetch(CSV_URL, { cache: "no-store" });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const text = await resp.text();
-    const rows = csvParse(text);
-    if (!rows.length) throw new Error("CSV 空白");
-    const headers = rows[0].map(h => h.trim());
-    const idxCountry = headers.findIndex(h => /country/i.test(h));
-    const idxTerms   = headers.findIndex(h => /terms?used/i.test(h));
-    const idxDef     = headers.findIndex(h => /definition/i.test(h));
-    if (idxCountry < 0 || idxDef < 0) throw new Error("缺少必要欄位 (Country/Definition)");
-
-    const data = rows.slice(1).map(r => {
-      const country = (r[idxCountry] || "").trim();
-      const terms   = (idxTerms >= 0 ? r[idxTerms] : "" ) || "";
-      const def     = (r[idxDef] || "").trim();
-      const flags = {};
-      const textForMatch = `${terms}\n${def}`;
-      TAG_RULES.forEach(rule => flags[rule.key] = rule.regex.test(textForMatch));
-      return {
-        Country: country,
-        TermsUsed: terms,
-        Definition: def,
-        short: shortText(def, 200),
-        flags
-      };
-    }).filter(d => d.Country && d.Definition);
-
-    State.data = data;
-    State.filtered = data.slice();
-  } catch (err) {
-    const cards = $("#cardsWrap");
-    cards.innerHTML = `
-      <div class="empty">
-        無法讀取 CSV（${err.message}）。<br/>
-        請確認檔案放在 <code>${CSV_URL}</code>，或在 <code>app.js</code> 上方改路徑。
-      </div>
-    `;
-  }
+/* Header */
+header {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--accent) 100%);
+  color: #fff;
+  padding: 26px 22px 10px;
+  text-align: center;
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+header h1 {
+  font-size: clamp(22px, 2.2vw, 28px);
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.subtitle {
+  font-size: 14px;
+  opacity: .95;
+  margin-top: 6px;
 }
 
-/* ======================  Controls  ====================== */
-function buildControls() {
-  // Country select
-  const uniqueCountries = Array.from(new Set(State.data.map(d => d.Country))).sort((a,b)=>a.localeCompare(b));
-  const sel = $("#countrySelect");
-  sel.innerHTML = `<option value="ALL">全部國家</option>` + uniqueCountries.map(c => `<option>${escapeHTML(c)}</option>`).join("");
-  sel.addEventListener("change", e => {
-    State.selectedCountry = e.target.value;
-    applyFilters();
-  });
+/* Top nav */
+.topnav {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.topnav .nav-link {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,.25);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 999px;
+  font-size: 13px;
+  transition: background .16s ease, border-color .16s ease;
+}
+.topnav .nav-link:hover { background: rgba(255,255,255,.15); }
+.topnav .nav-link.active { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.35); }
 
-  // Search
-  $("#searchInput").addEventListener("input", e => {
-    State.searchText = e.target.value.trim();
-    applyFilters();
-  });
+/* Main area */
+.main-content { display: block; width: 100%; padding: 0 18px; }
 
-  // Tag bar
-  const tagBar = $("#tagBar");
-  tagBar.innerHTML = TAG_RULES.map(t =>
-    `<button class="tag" data-key="${t.key}">${t.label}</button>`
-  ).join("");
-  tagBar.addEventListener("click", e => {
-    const btn = e.target.closest(".tag");
-    if (!btn) return;
-    const key = btn.dataset.key;
-    if (State.selectedTags.has(key)) State.selectedTags.delete(key);
-    else State.selectedTags.add(key);
-    btn.classList.toggle("active");
-    applyFilters();
-  });
+/* ====== Home: topics grid ====== */
+.home-hero {
+  margin: 26px 0 10px;
+  text-align: center;
+}
+.home-hero h2 { font-size: 22px; font-weight: 800; color: var(--ink); }
+.home-hero p  { color: var(--ink-2); margin-top: 6px; }
 
-  // Compare actions
-  $("#btnClearCompare").addEventListener("click", () => {
-    State.compareSet.clear();
-    renderCompare();
-    // uncheck checkboxes
-    $$(".card input[type='checkbox']").forEach(cb => cb.checked = false);
-  });
-  $("#btnCopyCompare").addEventListener("click", copyCompare);
+.topics {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 1100px) { .topics { grid-template-columns: repeat(2, 1fr);} }
+@media (max-width: 680px)  { .topics { grid-template-columns: 1fr;} }
+
+.topic-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  position: relative;
+}
+.topic-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(37, 99, 235, .35);
+  box-shadow: var(--shadow);
+}
+.topic-emoji { font-size: 28px; }
+.topic-title { font-size: 16px; font-weight: 800; margin-top: 6px; color: var(--ink); }
+.topic-desc  { font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
+.topic-actions { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+.topic-badge {
+  position: absolute; right: 10px; top: 10px;
+  font-size: 12px; padding: 4px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: #fff; color: var(--muted);
+}
+.topic-card.available .topic-badge { display: none; }
+.topic-card.coming .topic-actions .btn { opacity: .6; pointer-events: none; }
+
+/* Shared buttons/chips */
+.btn, .chip {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .16s ease;
+}
+.btn:hover { border-color: var(--brand); }
+.btn.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.btn.primary:hover { background: var(--brand-700); }
+
+/* ====== Definitions Explorer (內頁) ====== */
+#definitionsExplorer {
+  margin: 26px 0 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
 }
 
-/* ======================  Filtering  ====================== */
-function applyFilters() {
-  const q = State.searchText.toLowerCase();
-  State.filtered = State.data.filter(d => {
-    // country filter
-    if (State.selectedCountry !== "ALL" && d.Country !== State.selectedCountry) return false;
+/* Controls Bar */
+.controls {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  grid-template-columns: 1.2fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+@media (max-width: 900px) { .controls { grid-template-columns: 1fr; } }
 
-    // tag filters: every selected tag must be true
-    for (const key of State.selectedTags) if (!d.flags[key]) return false;
-
-    // text search on country + terms + definition
-    if (q) {
-      const hay = (d.Country + " " + d.TermsUsed + " " + d.Definition).toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
-  renderCards();
+.searchbox { display: flex; gap: 8px; align-items: center; }
+.searchbox input[type="text"]{
+  flex: 1; padding: 10px 12px; border: 1.5px solid var(--line);
+  border-radius: 10px; outline: none; background: #fff; font-size: 14px;
+}
+.searchbox input[type="text"]:focus{
+  border-color: var(--brand); box-shadow: 0 0 0 4px rgba(14,165,165,.12);
+}
+.selectbox select{
+  width: 100%; padding: 10px 12px; border: 1.5px solid var(--line);
+  border-radius: 10px; font-size: 14px; background: #fff; outline: none;
+}
+.tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag {
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px;
+  font-size: 12px; color: var(--ink-2); background: #fff; cursor: pointer;
+  transition: all .16s ease;
+}
+.tag:hover { border-color: var(--brand); }
+.tag.active {
+  background: var(--brand); color: #fff; border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(14,165,165,.14);
 }
 
-/* ======================  Render Cards  ====================== */
-function renderAll() {
-  renderCards();
-  renderCompare();
+/* Cards Grid */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px)  { .cards { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px; box-shadow: var(--shadow-sm);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.card:hover { transform: translateY(-2px); border-color: rgba(37, 99, 235, .35); box-shadow: var(--shadow); }
+.card-header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
+.country { font-weight: 800; color: var(--ink); font-size: 16.5px; }
+.terms   { color: var(--accent-700); font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.summary { color: var(--ink-2); font-size: 13.5px; }
+.actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.chip { background: var(--brand-50); border-color: rgba(14,165,165,.35); color: var(--brand-700); font-weight: 600; }
+
+/* Expanded text */
+.fulltext {
+  margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
+  color: var(--ink-2); font-size: 14px;
 }
 
-function renderCards() {
-  const wrap = $("#cardsWrap");
-  const empty = $("#emptyState");
-  if (!State.filtered.length) {
-    wrap.innerHTML = "";
-    empty.style.display = "block";
-    return;
-  }
-  empty.style.display = "none";
+/* Compare Drawer */
+.compare-drawer {
+  position: fixed; right: 16px; top: 96px; width: 320px;
+  max-height: calc(100dvh - 130px); overflow: auto;
+  background: #ffffffd2; backdrop-filter: blur(6px);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 12px; display: none;
+}
+.compare-drawer.open { display: block; }
+.compare-title { font-weight: 800; color: var(--ink); margin-bottom: 6px; }
+.compare-item { background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 8px; }
+.compare-item h4 { font-size: 14px; margin-bottom: 4px; }
+.compare-item .mini { font-size: 12.5px; color: var(--ink-2); }
+.compare-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
 
-  wrap.innerHTML = State.filtered.map((d, idx) => cardHTML(d, idx)).join("");
-  wrap.addEventListener("click", onCardClick, { once: true }); // delegate once to avoid multiple bindings
+/* Helper / Empty state */
+.empty {
+  text-align: center; padding: 40px 20px; color: var(--muted);
+  border: 1px dashed var(--line); border-radius: var(--radius); background: #ffffff90;
 }
 
-function cardHTML(d, idx) {
-  const chips = TAG_RULES
-    .filter(t => d.flags[t.key])
-    .slice(0, 3)  // show up to 3 chips
-    .map(t => `<span class="chip">${t.label}</span>`)
-    .join("");
+/* Footer */
+footer { margin-top: 22px; text-align: center; color: var(--muted); font-size: 13px; }
 
-  const checked = State.compareSet.has(d.Country) ? "checked" : "";
-  const safeCountry = escapeHTML(d.Country);
-  const safeTerms   = escapeHTML(d.TermsUsed || "—");
-  const safeShort   = escapeHTML(d.short);
-  const safeFull    = escapeHTML(d.Definition);
-
-  return `
-    <article class="card" data-idx="${idx}">
-      <div class="card-header">
-        <div>
-          <div class="country">${safeCountry}</div>
-          <div class="terms">${safeTerms}</div>
-        </div>
-        <label class="mini">
-          <input type="checkbox" class="cmp" data-country="${safeCountry}" ${checked} />
-          加入比較
-        </label>
-      </div>
-      <div class="summary">${safeShort}</div>
-      <div class="actions">
-        <button class="btn toggle">展開全文</button>
-        <div class="chips">${chips}</div>
-      </div>
-      <div class="fulltext" style="display:none;">${safeFull}</div>
-    </article>
-  `;
-}
-
-function onCardClick(e) {
-  const btn = e.target.closest(".toggle");
-  const cmp = e.target.closest("input.cmp");
-  if (btn) {
-    const card = e.target.closest(".card");
-    const full = $(".fulltext", card);
-    const open = full.style.display !== "none";
-    full.style.display = open ? "none" : "block";
-    btn.textContent = open ? "展開全文" : "收合全文";
-  } else if (cmp) {
-    const country = cmp.dataset.country;
-    if (cmp.checked) {
-      if (State.compareSet.size >= 3) {
-        cmp.checked = false;
-        alert("一次最多比較 3 個國家");
-        return;
-      }
-      State.compareSet.add(country);
-    } else {
-      State.compareSet.delete(country);
-    }
-    renderCompare();
-  }
-  // keep delegating
-  $("#cardsWrap").addEventListener("click", onCardClick, { once: true });
-}
-
-/* ======================  Compare Drawer  ====================== */
-function renderCompare() {
-  const drawer = $("#compareDrawer");
-  const list = $("#compareList");
-  const arr = Array.from(State.compareSet);
-
-  if (!arr.length) {
-    drawer.classList.remove("open");
-    list.innerHTML = `<div class="mini" style="color:#64748b;">尚未選擇國家。勾選卡片右上「加入比較」。</div>`;
-    return;
-  }
-  drawer.classList.add("open");
-
-  const items = arr.map((c) => {
-    const d = State.data.find(x => x.Country === c);
-    const bullets = deriveBullets(d).map(b => `• ${escapeHTML(b)}`).join("<br>");
-    return `
-      <div class="compare-item">
-        <h4>${escapeHTML(d.Country)}</h4>
-        <div class="mini"><strong>稱呼：</strong>${escapeHTML(d.TermsUsed || "—")}</div>
-        <div class="mini" style="margin-top:4px">${bullets}</div>
-      </div>
-    `;
-  }).join("");
-
-  list.innerHTML = items;
-}
-
-function deriveBullets(d) {
-  // Very simple rule-based summary
-  const out = [];
-  if (d.flags.HasPublicProvider) out.push("由公部門/地方政府提供或管理");
-  if (d.flags.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
-  if (d.flags.HasBelowMarketRent) out.push("租金低於市價或受管制");
-  if (d.flags.HasIncomeTargeting) out.push("針對低收入/弱勢族群，需收入審查");
-  if (d.flags.HasSubsidyOrLoans) out.push("提供補貼/貸款/稅務優惠等支持");
-  if (d.flags.LegalDefined) out.push("有法律/法規上的明確定義");
-  if (!out.length) out.push(shortText(d.Definition, 120));
-  return out.slice(0, 5);
-}
-
-async function copyCompare() {
-  try {
-    const arr = Array.from(State.compareSet);
-    if (!arr.length) return;
-    const blocks = arr.map(c => {
-      const d = State.data.find(x => x.Country === c);
-      const lines = [
-        `國家：${d.Country}`,
-        `稱呼：${d.TermsUsed || "—"}`,
-        `重點：${deriveBullets(d).join("；")}`,
-      ];
-      return lines.join("\n");
-    });
-    await navigator.clipboard.writeText(blocks.join("\n\n"));
-    alert("已複製比較摘要！");
-  } catch {
-    alert("複製失敗，請手動選取文字。");
-  }
-}
-
-/* ======================  Helpers  ====================== */
-function escapeHTML(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+/* Smooth fades */
+.fade-in { animation: fade .24s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
