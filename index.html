@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OECD 全球房屋數據可視化平台</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏘️ OECD 全球房屋數據可視化平台</h1>
+            <p class="subtitle">互動式數據分析與視覺化展示</p>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="category-section">
+                    <h3>📊 數據類別</h3>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-filter="all">全部顯示</button>
+                        <button class="filter-btn" data-filter="HC">住房條件 (HC)</button>
+                        <button class="filter-btn" data-filter="HM">住房市場 (HM)</button>
+                        <button class="filter-btn" data-filter="PH">公共政策 (PH)</button>
+                    </div>
+                </div>
+
+                <div class="dataset-section">
+                    <h3>📁 選擇數據集</h3>
+                    <div id="datasetList" class="dataset-list">
+                        <div class="loading">載入數據集中...</div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="content">
+                <div class="welcome-screen" id="welcomeScreen">
+                    <div class="welcome-content">
+                        <h2>歡迎使用 OECD 房屋數據可視化平台</h2>
+                        <p>本平台提供OECD全球房屋數據的互動式可視化分析</p>
+                        <div class="features">
+                            <div class="feature">
+                                <span class="icon">📈</span>
+                                <h4>互動圖表</h4>
+                                <p>點擊圖表元素查看詳細數據</p>
+                            </div>
+                            <div class="feature">
+                                <span class="icon">🔍</span>
+                                <h4>多維度分析</h4>
+                                <p>按國家、年份、指標篩選</p>
+                            </div>
+                            <div class="feature">
+                                <span class="icon">📊</span>
+                                <h4>多種圖表類型</h4>
+                                <p>折線圖、柱狀圖、雷達圖等</p>
+                            </div>
+                        </div>
+                        <p class="instruction">👈 請從左側選擇一個數據集開始探索</p>
+                    </div>
+                </div>
+
+                <div class="visualization-area" id="visualizationArea" style="display: none;">
+                    <div class="controls-bar">
+                        <h2 id="currentDatasetTitle">數據集標題</h2>
+                        <div class="chart-controls">
+                            <label>
+                                圖表類型:
+                                <select id="chartType">
+                                    <option value="line">折線圖</option>
+                                    <option value="bar">柱狀圖</option>
+                                    <option value="horizontalBar">橫向柱狀圖</option>
+                                    <option value="radar">雷達圖</option>
+                                    <option value="pie">圓餅圖</option>
+                                </select>
+                            </label>
+                            <button id="downloadBtn" class="btn-download">📥 下載圖表</button>
+                        </div>
+                    </div>
+
+                    <div class="data-filters" id="dataFilters">
+                        <!-- 動態生成的篩選器 -->
+                    </div>
+
+                    <div class="chart-container">
+                        <canvas id="mainChart"></canvas>
+                    </div>
+
+                    <div class="data-table-container">
+                        <h3>📋 數據表格</h3>
+                        <div class="table-wrapper" id="dataTable">
+                            <!-- 動態生成的數據表格 -->
+                        </div>
+                    </div>
+
+                    <div class="statistics-panel" id="statisticsPanel">
+                        <!-- 動態生成的統計信息 -->
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <footer>
+            <p>數據來源: OECD Affordable Housing Database | 最後更新: <span id="lastUpdate"></span></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
