@@ -1,0 +1,35 @@
+﻿Country,Country_Normalized,AllEligible,IncomeThreshold,CitizenshipOrPR,LocalResidency,Employment,OtherNotes
+Australia,Australia,No,Yes,Yes,Yes,No,Eligibility criteria for social housing is determined by state and territory housing authorities and varies between states and territories.
+Austria,Austria,No,Yes,Yes,Yes,,"Eligibility criteria differ between type of housing, subsidy scheme, and municipality. (Vienna)"
+Belgium,Belgium,No,Yes,Yes,No,No,Applicants must not be in possession of property rights.
+Bulgaria (1),Bulgaria,No,Yes,No,,,NA
+"Canada (1,2)","Canada (1,2)",No,Yes,No,Yes,No,Priority allocation varies by specific social housing programme.
+Colombia (1),Colombia,No,Yes,Yes,No,Yes,"Victims of forced displacement, informal sector workers, elderly, members of ethnic communities, people with disabilities, members of the public force and their families when the member of the public forces has died in service."
+Czechia,Czechia,No,NA,No,Yes,NA,Social housing is a competency of municipalities. Targets low-income; assessment should be non-discriminatory. Common criteria: any household member owns residential property.
+Denmark,Denmark,Yes,NA,NA,NA,NA,"Everyone is eligible; in some organisations, studying or being employed may skip the waiting list."
+Estonia,Estonia,No,Yes,Yes,Yes,NA,NA
+Finland (3),Finland,No,No,Yes,No,No,"Selection based on suitability and financial needs (housing needs, wealth, income). Priority to homeless and urgent need cases."
+"France (1,3)","France (1,3)",No,NA,Yes,NA,NA,NA
+Germany,Germany,No,Yes,Yes,No,No,Legal residency of at least one year.
+Hungary (1),Hungary,No,Yes,Yes,Yes,NA,Rents and eligibility regulated by municipal decree.
+"Iceland (1,3)","Iceland (1,3)",No,Yes,Yes,NA,NA,NA
+Ireland (4),Ireland,No,Yes,Yes,Yes,No,"Eligibility based on income, previous rent arrears, and availability of alternative accommodation."
+Israel (1),Israel,No,Yes,Yes,No,No,NA
+Italy (1),Italy,No,Yes,Yes,Yes,No,Criteria defined at local level with some general requirements.
+Japan,Japan,No,Yes,No,No,No,NA
+Latvia,Latvia,No,Yes,No,Yes,No,See priority cases in PH 4.3.5.
+Lithuania,Lithuania,No,Yes,Yes,Yes,No,NA
+"Luxembourg (1,3)","Luxembourg (1,3)",Yes,No,No,NA,NA,NA
+"Malta (1,3)","Malta (1,3)",No,Yes,Yes,NA,NA,NA
+Netherlands,Netherlands,No,Yes,Yes,No,No,"Income thresholds include work, home, dividends/shares, investments/savings."
+New Zealand,New Zealand,No,Yes,Yes,No,No,NA
+Norway,Norway,No,Yes,Yes,NA,NA,Housing situation is also a criterion. Exceptions for some refugees regarding citizenship.
+Peru,Peru,Yes,NA,NA,NA,NA,NA
+Poland,Poland,No,Yes,NA,Yes,No,Local residency or work in the municipality. Income thresholds and additional criteria set by municipalities.
+Portugal,Portugal,Yes,NA,NA,NA,NA,NA
+Romania (1),Romania,No,Yes,NA,NA,NA,NA
+Slovak Republic (5),Slovak Republic,No,Yes,No,No,No,"Legally only income level; in practice municipalities add criteria (e.g., permanent residency)."
+Slovenia,Slovenia,No,Yes,NA,NA,NA,NA
+South Africa (1),South Africa,No,Yes,Yes,NA,NA,NA
+United Kingdom: England (1),United Kingdom (England),No,No,No,No,No,Open to British citizens or those with indefinite right to remain. Allocation by local authorities' criteria.
+United States,United States,No,Yes,No,No,No,"Besides income, eligibility assessed by family status, age (elderly), and disability."
