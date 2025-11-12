@@ -1,73 +1,115 @@
 /* =========================================================================
-   國際住宅數據庫 — 路由 + 五主題互連
-   - #/definitions    社宅定義
-   - #/eligibility    申請資格
-   - #/reassessment   再審查頻率
-   - #/priority       優先分配
-   - #/characteristics社宅特徵（本次新增）
+   國際住宅數據庫 — 路由 + 五主題互連（超耐髒 CSV 解析）
+   - #/definitions     社宅定義
+   - #/eligibility     申請資格
+   - #/reassessment    再審查頻率
+   - #/priority        優先分配
+   - #/characteristics 社宅特徵
    ======================================================================= */
 
 /** 資料路徑（若你調整 GitHub 路徑，改這裡即可） */
-const CSV_DEFINITIONS   = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
-const CSV_ELIGIBILITY   = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
-const CSV_REASSESSMENT  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
-const CSV_PRIORITY      = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
+const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+const CSV_ELIGIBILITY     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
+const CSV_REASSESSMENT    = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
+const CSV_PRIORITY        = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
 const CSV_CHARACTERISTICS = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_characteristics_clean_utf8.csv";
-
-/** 首頁主題卡 */
-const TOPICS = [
-  { slug: "definitions",   emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
-  { slug: "eligibility",   emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
-  { slug: "reassessment",  emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
-  { slug: "priority",      emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者等優先規則一覽",       available: true,  cta: "查看條件" },
-  { slug: "characteristics",emoji:"🏷️", title: "社宅特徵",         desc: "定價方式、租金調整、相對市價％、承租戶購屋權",  available: true,  cta: "查看特徵" },
-];
 
 /* ============ 小工具 ============ */
 const $  = (q, el = document) => el.querySelector(q);
 const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
 function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
+
+/** CSV 解析（支援 UTF-8 BOM、引號內逗號、雙引號跳脫） */
 function csvParse(text){
+  if (!text) return [];
+  // 去掉 BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows=[]; let cur=[],cell="",inQ=false;
-  for(let i=0;i<text.length;i++){ const c=text[i],n=text[i+1];
-    if(inQ){ if(c==='"'&&n==='"'){cell+='"';i++;} else if(c==='"'){inQ=false;} else {cell+=c;} }
-    else{ if(c==='"'){inQ=true;} else if(c===','){cur.push(cell);cell="";} else if(c==='\n'){cur.push(cell);rows.push(cur);cur=[];cell="";} else if(c!=='\r'){cell+=c;} }
+  for(let i=0;i<text.length;i++){
+    const c=text[i], n=text[i+1];
+    if(inQ){
+      if(c==='"'&&n==='"'){ cell+='"'; i++; }
+      else if(c==='"'){ inQ=false; }
+      else{ cell+=c; }
+    }else{
+      if(c==='"'){ inQ=true; }
+      else if(c===','){ cur.push(cell); cell=""; }
+      else if(c==='\n'){ cur.push(cell); rows.push(cur); cur=[]; cell=""; }
+      else if(c!=='\r'){ cell+=c; }
+    }
   }
-  if(cell||cur.length){cur.push(cell);rows.push(cur);}
+  if(cell || cur.length){ cur.push(cell); rows.push(cur); }
   return rows;
 }
+
+/** 標頭正規化成耐髒 key（移除非字母與數字，全小寫） */
+function normKey(s){
+  return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+}
+
+/** 用同義別名找欄位 index（headers: 第一列原始標頭陣列） */
+function idxByAliases(headers, aliases){
+  const keys = headers.map(h => normKey(h));
+  for (const a of aliases){
+    const i = keys.indexOf(a);
+    if (i !== -1) return i;
+  }
+  return -1;
+}
+
+/** 取得查詢字串物件 */
 function getQueryParams(hash){
-  const qIndex = hash.indexOf("?"); const out={};
+  const qIndex = hash.indexOf("?"); const out = {};
   if(qIndex === -1) return out;
   const q = hash.slice(qIndex+1);
   q.split("&").forEach(kv=>{
-    const [k,v] = kv.split("="); out[decodeURIComponent(k||"")] = decodeURIComponent((v||"").replace(/\+/g," "));
+    const [k,v] = kv.split("=");
+    out[decodeURIComponent(k||"")] = decodeURIComponent((v||"").replace(/\+/g," "));
   });
   return out;
 }
 
+/** YES/NO/NA 藥丸 */
+function pill(v){
+  const x = String(v||"NA").trim().toUpperCase();
+  if(x==="YES") return `<span class="pill y">YES</span>`;
+  if(x==="NO")  return `<span class="pill n">NO</span>`;
+  return `<span class="pill na">NA</span>`;
+}
+
 /* ============ 路由 ============ */
 window.addEventListener("DOMContentLoaded", () => { renderRoute(); window.addEventListener("hashchange", renderRoute); });
+
 function setActive(route){
   $$(".topnav .nav-link").forEach(a=>a.classList.remove("active"));
   const m = route.replace(/^#\//,"").split("?")[0] || "";
-  const el = $(`.topnav .nav-link[data-route="${m||'home'}"]`); if(el) el.classList.add("active");
+  const el = $(`.topnav .nav-link[data-route="${m||'home'}"]`);
+  if(el) el.classList.add("active");
 }
+
 function renderRoute(){
   const hash = (location.hash || "#/").replace(/^#/, "");
   const main = $(".main-content"); main.innerHTML = "";
   setActive(hash);
 
-  if(hash.startsWith("/definitions")) renderDefinitions(main);
+  if(hash.startsWith("/definitions"))    renderDefinitions(main);
   else if(hash.startsWith("/eligibility")) renderEligibility(main);
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
-  else if(hash.startsWith("/priority")) renderPriority(main, getQueryParams(hash));
+  else if(hash.startsWith("/priority"))  renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
   else renderHome(main);
 }
 
 /* ============ 首頁 ============ */
+const TOPICS = [
+  { slug: "definitions",     emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
+  { slug: "eligibility",     emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
+  { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
+  { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者等優先規則一覽",       available: true,  cta: "查看條件" },
+  { slug: "characteristics", emoji:"🏷️", title: "社宅特徵",         desc: "定價方式、租金調整、相對市價％、承租戶購屋權",  available: true,  cta: "查看特徵" },
+];
+
 function renderHome(root){
   const wrap = document.createElement("section");
   wrap.className = "home fade-in";
@@ -92,7 +134,7 @@ function renderHome(root){
 }
 
 /* =========================================================================
-   社宅定義（簡化保留）
+   社宅定義
    ======================================================================= */
 const TAG_RULES = [
   { key:"HasPublicProvider",    label:"公部門提供",     regex:/(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
@@ -129,18 +171,25 @@ async function renderDefinitions(root){
 }
 
 async function loadDefinitions(){
-  const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"});
-  const text = await resp.text();
+  let text="";
+  try{
+    const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    text = await resp.text();
+  }catch(err){ console.error("Fetch CSV_DEFINITIONS failed:", err); DefState.data=[]; DefState.filtered=[]; return; }
+
   const rows = csvParse(text);
-  const headers = rows[0].map(h=>h.trim());
-  const iC = headers.findIndex(h=>/country/i.test(h));
-  const iT = headers.findIndex(h=>/terms?used/i.test(h));
-  const iD = headers.findIndex(h=>/definition/i.test(h));
+  if(!rows.length){ DefState.data=[]; DefState.filtered=[]; return; }
+
+  const headers = rows[0];
+  const iC = idxByAliases(headers, ["country"]);
+  const iT = idxByAliases(headers, ["termsused","term(s)used","terms"]);
+  const iD = idxByAliases(headers, ["definition","definitionandsummaryoverview","definitionoverview"]);
   const raw = rows.slice(1).map(r=>{
-    const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(r[iD]||"").trim();
+    const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(iD>=0?(r[iD]||""):"").trim();
+    if(!Country || !Definition) return null;
     const flags={}; TAG_RULES.forEach(rule=>flags[rule.key]=rule.regex.test(`${TermsUsed}\n${Definition}`));
     return { Country, TermsUsed, Definition, short: shortText(Definition,200), flags };
-  }).filter(d=>d.Country && d.Definition);
+  }).filter(Boolean);
 
   const map = new Map();
   for(const it of raw){
@@ -155,6 +204,7 @@ async function loadDefinitions(){
   })).sort((a,b)=>a.Country.localeCompare(b.Country));
   DefState.filtered = DefState.data.slice();
 }
+
 function buildDefControls(){
   const countries = Array.from(new Set(DefState.data.map(d=>d.Country))).sort((a,b)=>a.localeCompare(b));
   $("#def_country").innerHTML = `<option value="ALL">全部國家</option>` + countries.map(c=>`<option>${escapeHTML(c)}</option>`).join("");
@@ -168,6 +218,7 @@ function buildDefControls(){
     applyDefFilters();
   });
 }
+
 function applyDefFilters(){
   const q=DefState.searchText.toLowerCase();
   DefState.filtered = DefState.data.filter(d=>{
@@ -181,6 +232,7 @@ function applyDefFilters(){
   });
   renderDefCards();
 }
+
 function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
@@ -216,6 +268,7 @@ function renderDefCards(){
         </div>
       </article>`;
   }).join("");
+
   // 展開全文
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
@@ -230,7 +283,7 @@ function renderDefCards(){
 }
 
 /* =========================================================================
-   申請資格（略同前版）
+   申請資格
    ======================================================================= */
 const EliState = { raw:[], view:"matrix", search:"" };
 
@@ -272,33 +325,55 @@ async function renderEligibility(root){
   bindEligibilityControls();
   renderEligibilityView();
 }
+
 async function loadEligibility(){
-  const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"});
-  const text = await resp.text();
-  const rows = csvParse(text);
-  const h = rows[0].map(x=>x.trim());
-  const idx = (name)=>h.findIndex(k=>k.toLowerCase()===name.toLowerCase());
-  const m = {
-    Country: idx("Country"), CountryNormalized: idx("Country_Normalized"),
-    All: idx("AllEligible"), Inc: idx("IncomeThreshold"), PR: idx("CitizenshipOrPR"),
-    Res: idx("LocalResidency"), Emp: idx("Employment"), Note: idx("OtherNotes"),
+  let text=""; 
+  try{
+    const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    text = await resp.text();
+  }catch(err){ console.error("Fetch CSV_ELIGIBILITY failed:", err); EliState.raw=[]; return; }
+
+  const rows = csvParse(text); if(!rows.length){ EliState.raw=[]; return; }
+  const h = rows[0];
+
+  const col = {
+    Country: idxByAliases(h, ["country"]),
+    CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
+    All: idxByAliases(h, ["alleligible","allareeligible","all"]),
+    Inc: idxByAliases(h, ["incomethreshold","income"]),
+    PR:  idxByAliases(h, ["citizenshiporpr","citizenshippermresidency","citizenship","permresidency"]),
+    Res: idxByAliases(h, ["localresidency","residency","local"]),
+    Emp: idxByAliases(h, ["employment"]),
+    Note:idxByAliases(h, ["othernotes","notes","note"])
   };
-  EliState.raw = rows.slice(1).map(r=>({
-    c:(r[m.Country]||"").trim(), cn:(r[m.CountryNormalized]||"").trim()||(r[m.Country]||"").trim(),
-    All:(r[m.All]||"NA").trim(), Inc:(r[m.Inc]||"NA").trim(), PR:(r[m.PR]||"NA").trim(),
-    Res:(r[m.Res]||"NA").trim(), Emp:(r[m.Emp]||"NA").trim(), Note:(r[m.Note]||"").trim()
-  })).filter(x=>x.c);
+
+  EliState.raw = rows.slice(1).map(r=>{
+    const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
+    const c  = get(col.Country);
+    if(!c) return null;
+    return {
+      c,
+      cn: get(col.CountryNormalized) || c,
+      All: get(col.All,"NA"),
+      Inc: get(col.Inc,"NA"),
+      PR:  get(col.PR,"NA"),
+      Res: get(col.Res,"NA"),
+      Emp: get(col.Emp,"NA"),
+      Note:get(col.Note,"")
+    };
+  }).filter(Boolean);
 }
+
 function bindEligibilityControls(){
   $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
   $("#eli_sort").addEventListener("change",renderEligibilityView);
   $("#eli_mode").addEventListener("change",e=>{EliState.view=e.target.value; renderEligibilityView();});
   $("#eli_quick").addEventListener("click",(e)=>{
     const t=e.target.closest(".tag"); if(!t) return;
-    const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search="";
-    EliState.quick={key:k,val:v}; renderEligibilityView();
+    const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search=""; EliState.quick={key:k,val:v}; renderEligibilityView();
   });
 }
+
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
@@ -314,6 +389,7 @@ function filterEligibility(data){
     return true;
   });
 }
+
 function sortEligibility(arr){
   const how=$("#eli_sort").value;
   if(how==="score"){
@@ -321,11 +397,12 @@ function sortEligibility(arr){
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-function pill(v){ const x=String(v||"NA").trim().toUpperCase(); if(x==="YES")return`<span class="pill y">YES</span>`; if(x==="NO")return`<span class="pill n">NO</span>`; return`<span class="pill na">NA</span>`; }
+
 function renderEligibilityView(){
   const mount=$("#eli_mount"), empty=$("#eli_empty");
   let data = filterEligibility(EliState.raw.slice()); sortEligibility(data);
-  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; } empty.style.display="none";
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
+  empty.style.display="none";
 
   if(EliState.view==="matrix") mount.innerHTML = `
     <div class="matrix">
@@ -373,7 +450,7 @@ function renderEligibilityView(){
 }
 
 /* =========================================================================
-   再審查頻率（略同前版）
+   再審查頻率
    ======================================================================= */
 const ReaState = { raw:[], search:"", sort:"az", preselectCountry:null };
 
@@ -405,28 +482,60 @@ async function renderReassessment(root, params={}){
   bindReassessmentControls();
   renderReassessmentTable();
 }
+
 async function loadReassessment(){
-  const resp = await fetch(CSV_REASSESSMENT,{cache:"no-store"}); const text = await resp.text();
-  const rows = csvParse(text); const h = rows[0].map(x=>x.trim()); const idx = (n)=>h.findIndex(k=>k.toLowerCase()===n.toLowerCase());
-  const m = { Country: idx("Country"), Segment: idx("Segment"), CountryNormalized: idx("Country_Normalized"), Freq: idx("StandardizedFrequency"), Detail: idx("Detail") };
-  ReaState.raw = rows.slice(1).map(r=>({
-    c:(r[m.Country]||"").trim(), seg:(r[m.Segment]||"").trim(), cn:(r[m.CountryNormalized]||"").trim()||(r[m.Country]||"").trim(),
-    freq:(r[m.Freq]||"").trim(), detail:(r[m.Detail]||"").trim()
-  })).filter(x=>x.c);
+  let text="";
+  try{
+    const resp = await fetch(CSV_REASSESSMENT,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    text = await resp.text();
+  }catch(err){ console.error("Fetch CSV_REASSESSMENT failed:", err); ReaState.raw=[]; return; }
+
+  const rows = csvParse(text); if(!rows.length){ ReaState.raw=[]; return; }
+  const h = rows[0];
+  const col = {
+    Country: idxByAliases(h, ["country"]),
+    Segment: idxByAliases(h, ["segment","scheme","program"]),
+    CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
+    Freq: idxByAliases(h, ["standardizedfrequency","frequency","freq","reassessmentfrequency"]),
+    Detail: idxByAliases(h, ["detail","notes","othernotes","remark","remarks"])
+  };
+  ReaState.raw = rows.slice(1).map(r=>{
+    const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
+    const c=get(col.Country); if(!c) return null;
+    return {
+      c,
+      seg:get(col.Segment),
+      cn:get(col.CountryNormalized)||c,
+      freq:get(col.Freq),
+      detail:get(col.Detail)
+    };
+  }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
-function bindReassessmentControls(){ $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();}); $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();}); }
-function filterReassessment(d){ const q=ReaState.search; if(!q) return d; return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].join(" ").toLowerCase().includes(q)); }
+
+function bindReassessmentControls(){
+  $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
+  $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
+}
+
+function filterReassessment(d){
+  const q=ReaState.search; if(!q) return d;
+  return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].join(" ").toLowerCase().includes(q));
+}
+
 function sortReassessment(arr){
   if(ReaState.sort==="freq"){
     const order=["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
-    const score=v=>{const i=order.indexOf(v);return i===-1?999:i;}; arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
+    const score=v=>{const i=order.indexOf(v);return i===-1?999:i;};
+    arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderReassessmentTable(){
   const mount=$("#rea_mount"), empty=$("#rea_empty");
   let data = filterReassessment(ReaState.raw.slice()); sortReassessment(data);
-  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; } empty.style.display="none";
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
+  empty.style.display="none";
   mount.innerHTML = `
     <div class="matrix">
       <table class="table">
@@ -451,7 +560,7 @@ function renderReassessmentTable(){
 }
 
 /* =========================================================================
-   優先分配條件（略同前版）
+   優先分配條件
    ======================================================================= */
 const PriState = { raw:[], search:"", quick:null, sort:"az", preselectCountry:null };
 
@@ -494,26 +603,50 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
-async function loadPriority(){
-  const resp = await fetch(CSV_PRIORITY,{cache:"no-store"});
-  const text = await resp.text();
-  const rows = csvParse(text);
-  const h = rows[0].map(x=>x.trim()); const idx=(n)=>h.findIndex(k=>k.toLowerCase()===n.toLowerCase());
-  const m = {
-    Country: idx("Country"), CountryNormalized: idx("Country_Normalized"),
-    Wait: idx("TimeOnWaitingList"), Income: idx("IncomeLevel"), Dis: idx("Disability"), Eld: idx("Elderly"),
-    Asy: idx("AsylumSeekers"), Eth: idx("EthnicOrRacialMinority"), HH: idx("HouseholdCompositionOrSize"),
-    Cond: idx("CurrentHousingConditions"), Note: idx("OtherNotes")
-  };
-  PriState.raw = rows.slice(1).map(r=>({
-    c:(r[m.Country]||"").trim(), cn:(r[m.CountryNormalized]||"").trim()||(r[m.Country]||"").trim(),
-    Wait:(r[m.Wait]||"NA").trim(), Income:(r[m.Income]||"NA").trim(), Dis:(r[m.Dis]||"NA").trim(),
-    Eld:(r[m.Eld]||"NA").trim(), Asy:(r[m.Asy]||"NA").trim(), Eth:(r[m.Eth]||"NA").trim(),
-    HH:(r[m.HH]||"NA").trim(), Cond:(r[m.Cond]||"NA").trim(), Note:(r[m.Note]||"").trim()
-  })).filter(x=>x.c);
 
+async function loadPriority(){
+  let text="";
+  try{
+    const resp = await fetch(CSV_PRIORITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    text = await resp.text();
+  }catch(err){ console.error("Fetch CSV_PRIORITY failed:", err); PriState.raw=[]; return; }
+
+  const rows = csvParse(text); if(!rows.length){ PriState.raw=[]; return; }
+  const h = rows[0];
+  const col = {
+    Country: idxByAliases(h, ["country"]),
+    CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
+    Wait: idxByAliases(h, ["timeonwaitinglist","waitinglist","wait"]),
+    Income: idxByAliases(h, ["incomelevel","income"]),
+    Dis: idxByAliases(h, ["disability","disabled"]),
+    Eld: idxByAliases(h, ["elderly","older","senior"]),
+    Asy: idxByAliases(h, ["asylumseekers","asylum"]),
+    Eth: idxByAliases(h, ["ethnicorracialminority","ethnicminority","racialminority","minority"]),
+    HH: idxByAliases(h, ["householdcompositionorsize","householdsize","householdcomposition"]),
+    Cond: idxByAliases(h, ["currenthousingconditions","housingconditions","currenthousing"]),
+    Note: idxByAliases(h, ["othernotes","notes","note"])
+  };
+
+  PriState.raw = rows.slice(1).map(r=>{
+    const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
+    const c=get(col.Country); if(!c) return null;
+    return {
+      c,
+      cn:get(col.CountryNormalized)||c,
+      Wait:get(col.Wait,"NA"),
+      Income:get(col.Income,"NA"),
+      Dis:get(col.Dis,"NA"),
+      Eld:get(col.Eld,"NA"),
+      Asy:get(col.Asy,"NA"),
+      Eth:get(col.Eth,"NA"),
+      HH:get(col.HH,"NA"),
+      Cond:get(col.Cond,"NA"),
+      Note:get(col.Note,"")
+    };
+  }).filter(Boolean);
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
+
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -522,7 +655,7 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
-function pill(v){ const x=String(v||"NA").trim().toUpperCase(); if(x==="YES")return`<span class="pill y">YES</span>`; if(x==="NO")return`<span class="pill n">NO</span>`; return`<span class="pill na">NA</span>`; }
+
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
@@ -538,16 +671,19 @@ function filterPriority(data){
     return true;
   });
 }
+
 function sortPriority(arr){
   if(PriState.sort==="score"){
     const score=d=>["Wait","Income","Dis","Eld","Asy","Eth","HH","Cond"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderPriorityTable(){
   const mount=$("#pri_mount"), empty=$("#pri_empty");
   let data = filterPriority(PriState.raw.slice()); sortPriority(data);
-  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; } empty.style.display="none";
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
+  empty.style.display="none";
 
   mount.innerHTML = `
     <div class="matrix">
@@ -594,7 +730,7 @@ function renderPriorityTable(){
 }
 
 /* =========================================================================
-   社宅特徵（新增頁） — 8 個旗標 + 百分比 + 承租戶購屋權
+   社宅特徵（8 旗標 + 百分比 + 承租戶購屋權）
    ======================================================================= */
 const ChaState = { raw:[], search:"", sort:"az", preselectCountry:null };
 
@@ -635,33 +771,55 @@ async function renderCharacteristics(root, params={}){
 }
 
 async function loadCharacteristics(){
-  const resp = await fetch(CSV_CHARACTERISTICS,{cache:"no-store"});
-  const text = await resp.text();
-  const rows = csvParse(text);
-  const h = rows[0].map(x=>x.trim()); const idx=(n)=>h.findIndex(k=>k.toLowerCase()===n.toLowerCase());
-  const m = {
-    Country: idx("Country"), CountryNormalized: idx("Country_Normalized"),
-    MB: idx("RentSetting_MarketBased"), CB: idx("RentSetting_CostBased"),
-    IB: idx("RentSetting_IncomeBased"), UB: idx("RentSetting_UtilityBased"),
-    IncReg: idx("RentIncrease_Regular"), IncNot: idx("RentIncrease_NotRegular"),
-    Pct: idx("SocialRentPctOfMarket"),
-    Buy: idx("SittingTenantRightToBuy_Norm"), BuyNote: idx("SittingTenantRightToBuy_Notes")
+  let text="";
+  try{
+    const resp = await fetch(CSV_CHARACTERISTICS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    text = await resp.text();
+  }catch(err){ console.error("Fetch CSV_CHARACTERISTICS failed:", err); ChaState.raw=[]; return; }
+
+  const rows = csvParse(text); if(!rows.length){ ChaState.raw=[]; return; }
+  const h = rows[0];
+
+  const col = {
+    Country: idxByAliases(h, ["country"]),
+    CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
+    MB: idxByAliases(h, ["rentsettingmarketbased","marketbased"]),
+    CB: idxByAliases(h, ["rentsettingcostbased","costbased"]),
+    IB: idxByAliases(h, ["rentsettingincomebased","incomebased"]),
+    UB: idxByAliases(h, ["rentsettingutilitybased","utilitybased"]),
+    IncReg: idxByAliases(h, ["rentincreaseregular","rentincreasereg"]),
+    IncNot: idxByAliases(h, ["rentincreasenotregular","rentincreasenonregular","notregular"]),
+    Pct: idxByAliases(h, ["socialrentpctofmarket","socialrentpercentagemarket","socialrentshareofmarket","pct"]),
+    Buy: idxByAliases(h, ["sittingtenantrighttobuynorm","righttobuynorm","righttobuy"]),
+    BuyNote: idxByAliases(h, ["sittingtenantrighttobuynotes","righttobuynotes","notes","othernotes"])
   };
-  ChaState.raw = rows.slice(1).map(r=>({
-    c:(r[m.Country]||"").trim(), cn:(r[m.CountryNormalized]||"").trim()||(r[m.Country]||"").trim(),
-    MB:(r[m.MB]||"NA").trim(), CB:(r[m.CB]||"NA").trim(), IB:(r[m.IB]||"NA").trim(), UB:(r[m.UB]||"NA").trim(),
-    IncReg:(r[m.IncReg]||"NA").trim(), IncNot:(r[m.IncNot]||"NA").trim(),
-    Pct:(r[m.Pct]||"").trim(),
-    Buy:(r[m.Buy]||"NA").trim(), BuyNote:(r[m.BuyNote]||"").trim()
-  })).filter(x=>x.c);
+
+  ChaState.raw = rows.slice(1).map(r=>{
+    const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
+    const c=get(col.Country); if(!c) return null;
+    return {
+      c,
+      cn:get(col.CountryNormalized)||c,
+      MB:get(col.MB,"NA"),
+      CB:get(col.CB,"NA"),
+      IB:get(col.IB,"NA"),
+      UB:get(col.UB,"NA"),
+      IncReg:get(col.IncReg,"NA"),
+      IncNot:get(col.IncNot,"NA"),
+      Pct:get(col.Pct,""),
+      Buy:get(col.Buy,"NA"),
+      BuyNote:get(col.BuyNote,"")
+    };
+  }).filter(Boolean);
 
   if(ChaState.preselectCountry){ ChaState.search=ChaState.preselectCountry.toLowerCase(); const input=$("#cha_search"); if(input) input.value=ChaState.preselectCountry; }
 }
+
 function bindCharacteristicsControls(){
   $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim().toLowerCase(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
-function pillYN(v){ const x=String(v||"NA").trim().toUpperCase(); if(x==="YES")return`<span class="pill y">YES</span>`; if(x==="NO")return`<span class="pill n">NO</span>`; return`<span class="pill na">NA</span>`; }
+
 function filterCharacteristics(data){
   const q=ChaState.search;
   if(!q) return data;
@@ -670,16 +828,19 @@ function filterCharacteristics(data){
     return hay.includes(q);
   });
 }
+
 function sortCharacteristics(arr){
   if(ChaState.sort==="score"){
     const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderCharacteristicsTable(){
   const mount=$("#cha_mount"), empty=$("#cha_empty");
   let data = filterCharacteristics(ChaState.raw.slice()); sortCharacteristics(data);
-  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; } empty.style.display="none";
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
+  empty.style.display="none";
 
   mount.innerHTML = `
     <div class="matrix">
@@ -702,12 +863,12 @@ function renderCharacteristicsTable(){
           ${data.map(d=>`
             <tr>
               <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
-              <td>${pillYN(d.MB)}</td>
-              <td>${pillYN(d.CB)}</td>
-              <td>${pillYN(d.IB)}</td>
-              <td>${pillYN(d.UB)}</td>
-              <td>${pillYN(d.IncReg)}</td>
-              <td>${pillYN(d.IncNot)}</td>
+              <td>${pill(d.MB)}</td>
+              <td>${pill(d.CB)}</td>
+              <td>${pill(d.IB)}</td>
+              <td>${pill(d.UB)}</td>
+              <td>${pill(d.IncReg)}</td>
+              <td>${pill(d.IncNot)}</td>
               <td>${escapeHTML(d.Pct||"")}</td>
               <td>${escapeHTML(d.Buy||"")}</td>
               <td class="note">${escapeHTML(d.BuyNote||"")}</td>
