@@ -1098,3 +1098,121 @@ function injectAISummaryButton(topic){
     }
   };
 }
+
+// --- 覆蓋版：先移除舊按鈕，找不到容器就插到 body 也要顯示 ---
+function injectAISummaryButton(topic){
+  // 先移除殘留的舊按鈕，避免路由切換後 id 已存在
+  const old = document.getElementById("ai-gen");
+  if (old && old.parentElement) old.parentElement.removeChild(old);
+
+  // 找容器：優先 .controls -> .actions -> .home-hero -> 有表格的父層 -> body
+  let container =
+    document.querySelector(".controls") ||
+    document.querySelector(".actions") ||
+    document.querySelector(".home-hero") ||
+    (document.querySelector(".matrix") ? document.querySelector(".matrix").parentElement : null) ||
+    document.body;
+
+  // 建立按鈕列
+  const bar = document.createElement("div");
+  bar.style.display = "flex";
+  bar.style.justifyContent = "flex-end";
+  bar.style.gap = "8px";
+  bar.style.margin = "10px 0 0";
+  bar.innerHTML = `<button id="ai-gen" class="btn">🧠 Generate summary</button>`;
+  container.appendChild(bar);
+
+  // 確保 Modal 存在
+  ensureAIModal();
+  const modal = document.getElementById("ai-modal");
+  const modalBody = document.getElementById("ai-body");
+  const closeBtn = document.getElementById("ai-close");
+  if (closeBtn) closeBtn.onclick = () => (modal.style.display = "none");
+
+  document.getElementById("ai-gen").onclick = async () => {
+    const data = collectVisibleTableData();
+    if (!data.rows.length) {
+      if (modalBody) modalBody.innerHTML = "No visible table to summarize.";
+      if (modal) modal.style.display = "flex";
+      return;
+    }
+
+    // 自動帶入 URL 裡的 country（若有）
+    const params = new URLSearchParams((location.hash.split("?")[1] || ""));
+    const country = params.get("country") || "";
+
+    if (ENABLE_AI && AI_API_BASE) {
+      try {
+        const payload = {
+          topic, mode: "page", language: "en",
+          filters: { country, search: "", sort: "" },
+          data: { ...data, stats: computeYesShare(data) }
+        };
+        if (modalBody) modalBody.innerHTML = "Generating…";
+        if (modal) modal.style.display = "flex";
+
+        const resp = await fetch(`${AI_API_BASE}/api/report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || "Failed");
+        if (modalBody) modalBody.innerHTML = json.html;
+      } catch (e) {
+        if (modalBody) modalBody.innerHTML = `⚠️ Failed to generate. ${e.message}`;
+        if (modal) modal.style.display = "flex";
+      }
+    } else {
+      const html = localSummarize(topic, data);
+      if (modalBody) modalBody.innerHTML = html;
+      if (modal) modal.style.display = "flex";
+    }
+  };
+}
+// --- 路由後保險：只要看到表格或控制列，就硬插一顆按鈕 ---
+(function ensureAIButtonAfterRoute(){
+  // 當前主題推斷
+  function currentTopic(){
+    const h = (location.hash || "#/").replace(/^#\//,"").split("?")[0];
+    if (h === "eligibility") return "eligibility";
+    if (h === "reassessment") return "reassessment";
+    if (h === "priority") return "priority";
+    if (h === "characteristics") return "characteristics";
+    if (h === "definitions") return "definitions";
+    return null;
+  }
+
+  // 觀察 DOM 變化（頁面剛渲染完會觸發）
+  const obs = new MutationObserver(() => {
+    const topic = currentTopic();
+    const hasTable = !!document.querySelector(".matrix table");
+    const hasControls = !!document.querySelector(".controls, .actions, .home-hero");
+    const hasButton = !!document.getElementById("ai-gen");
+
+    // 在主題頁、且尚未有按鈕、且有控制列或表格時插入
+    if (topic && !hasButton && (hasControls || hasTable)) {
+      injectAISummaryButton(topic);
+    }
+  });
+
+  obs.observe(document.body, { childList: true, subtree: true });
+
+  // 初次載入也試一次
+  window.addEventListener("hashchange", () => {
+    // hash 改變時，稍微等內容 render 再插
+    setTimeout(() => {
+      const topic = currentTopic();
+      const hasButton = !!document.getElementById("ai-gen");
+      if (topic && !hasButton) injectAISummaryButton(topic);
+    }, 50);
+  });
+
+  // 極簡：首次進站延遲插入（避免你用的 render 是異步）
+  setTimeout(() => {
+    const topic = currentTopic();
+    const hasButton = !!document.getElementById("ai-gen");
+    if (topic && !hasButton) injectAISummaryButton(topic);
+  }, 100);
+})();
+
