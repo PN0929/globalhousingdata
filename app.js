@@ -1,422 +1,457 @@
 /* =========================================================================
-   國際住宅數據庫 — Home + Topic Router + Definitions Explorer
-   - Hash 路由：#/, #/definitions
-   - 首頁：主題卡
-   - Definitions Explorer：讀 CSV + 搜尋/標籤/比較
-   - 新增：同一國家多筆自動合併成單一卡片（卡內分段顯示）
+   國際住宅數據庫 — Home + 路由 + 兩主題互連
+   - #/definitions  社宅定義（多筆同國合併）
+   - #/eligibility  社宅申請資格（矩陣 / 卡片）
    ======================================================================= */
 
-/** CSV 路徑（目前只用於 "各國社宅定義" 主題） */
-const CSV_URL = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+/** 資料位置（你也可改指向 main 分支最新檔案） */
+const CSV_DEFINITIONS = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+const CSV_ELIGIBILITY = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
 
-/** 主題清單 */
+/** 主題清單（首頁卡片） */
 const TOPICS = [
-  { slug: "definitions", emoji: "🏘️", title: "各國社宅定義", desc: "快速查找、比較各國社會住宅的稱呼與定義", available: true, cta: "開始探索" },
-  { slug: "conditions",  emoji: "📊", title: "居住條件（HC）", desc: "面積、人均空間、設備可近性等指標", available: false, cta: "即將推出" },
-  { slug: "market",      emoji: "🏠", title: "住宅市場（HM）", desc: "持有/租賃結構、房屋型態、價格與供給", available: false, cta: "即將推出" },
-  { slug: "policy",      emoji: "🧩", title: "住宅政策（PH）", desc: "補貼、租金管制、社宅供給、稅務與貸款措施", available: false, cta: "即將推出" }
+  { slug: "definitions", emoji: "🏘️", title: "各國社宅定義", desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
+  { slug: "eligibility", emoji: "🧾", title: "社宅申請資格", desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" }
 ];
 
-/** 快速標籤偵測規則（definitions 用） */
-const TAG_RULES = [
-  { key: "HasPublicProvider",    label: "公部門提供",     regex: /(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
-  { key: "HasNonProfitProvider", label: "非營利/合作社",   regex: /(non[-\s]?profit|co-?operative|cooperative)/i },
-  { key: "HasBelowMarketRent",   label: "低於市價/租控",    regex: /(below market|rent cap|capped rent|regulated rent|moderate rent)/i },
-  { key: "HasIncomeTargeting",   label: "收入審查/目標族群", regex: /(income limit|low[-\s]?income|vulnerable|eligible|means[-\s]?test)/i },
-  { key: "HasSubsidyOrLoans",    label: "補貼/貸款/稅優惠",  regex: /(subsid(y|ies)|grant(s)?|loan(s)?|tax|preferential rate)/i },
-  { key: "LegalDefined",         label: "法律定義",         regex: /(law|act|defined in law|regulation|legal)/i },
-];
-
-/* ======================  Utility  ====================== */
+/* ============ 小工具 ============ */
 const $  = (q, el = document) => el.querySelector(q);
 const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 
-function escapeHTML(s) {
-  return String(s || "")
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;").replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-function shortText(s, n=180) {
-  if (!s) return "";
-  const clean = s.replace(/\s+/g, " ").trim();
-  if (clean.length <= n) return clean;
-  const cut = clean.slice(0, n);
-  const lastDot = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("。"));
-  return (lastDot > 60 ? cut.slice(0, lastDot + 1) : cut + "…");
-}
-function csvParse(text) {
-  // Simple CSV parser (handles commas inside quotes)
-  const rows = [];
-  let cur = [], cell = "", inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], n = text[i+1];
-    if (inQ) {
-      if (c === '"' && n === '"') { cell += '"'; i++; }
-      else if (c === '"') { inQ = false; }
-      else { cell += c; }
-    } else {
-      if (c === '"') inQ = true;
-      else if (c === ",") { cur.push(cell); cell=""; }
-      else if (c === "\n") { cur.push(cell); rows.push(cur); cur=[]; cell=""; }
-      else if (c === "\r") { /* ignore */ }
-      else { cell += c; }
-    }
+function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
+function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
+function csvParse(text){
+  const rows=[]; let cur=[],cell="",inQ=false;
+  for(let i=0;i<text.length;i++){ const c=text[i],n=text[i+1];
+    if(inQ){ if(c==='"'&&n==='"'){cell+='"';i++;} else if(c==='"'){inQ=false;} else {cell+=c;} }
+    else{ if(c==='"'){inQ=true;} else if(c===','){cur.push(cell);cell="";} else if(c==='\n'){cur.push(cell);rows.push(cur);cur=[];cell="";} else if(c!=='\r'){cell+=c;} }
   }
-  if (cell || cur.length) { cur.push(cell); rows.push(cur); }
+  if(cell||cur.length){cur.push(cell);rows.push(cur);}
   return rows;
 }
 
-/* ======================  Router  ====================== */
+/* ============ 路由 ============ */
 window.addEventListener("DOMContentLoaded", () => {
   renderRoute();
   window.addEventListener("hashchange", renderRoute);
 });
-
-function renderRoute() {
+function setActive(route){
+  $$(".topnav .nav-link").forEach(a=>a.classList.remove("active"));
+  const m = route.replace(/^#\//,"") || "";
+  const el = $(`.topnav .nav-link[data-route="${m||'home'}"]`); if(el) el.classList.add("active");
+}
+function renderRoute(){
   const hash = (location.hash || "#/").replace(/^#/, "");
-  const main = $(".main-content");
-  main.innerHTML = "";
+  const main = $(".main-content"); main.innerHTML = "";
+  setActive(hash);
 
-  // nav active
-  $$(".topnav .nav-link").forEach(a => a.classList.remove("active"));
-  if (hash.startsWith("/definitions")) {
-    $$(".topnav .nav-link").find(a => a.getAttribute("href")==="#/definitions")?.classList.add("active");
-    renderDefinitions(main);
-  } else {
-    $$(".topnav .nav-link").find(a => a.getAttribute("href")==="#/")?.classList.add("active");
-    renderHome(main);
-  }
+  if(hash.startsWith("/definitions")) renderDefinitions(main);
+  else if(hash.startsWith("/eligibility")) renderEligibility(main);
+  else renderHome(main);
 }
 
-/* ======================  Home ====================== */
-function renderHome(root) {
+/* ============ 首頁 ============ */
+function renderHome(root){
   const wrap = document.createElement("section");
   wrap.className = "home fade-in";
   wrap.innerHTML = `
     <div class="home-hero">
       <h2>主題總覽</h2>
-      <p>我們會持續更新更多住宅主題。現在可以先探索「各國社宅定義」。</p>
+      <p>點擊主題卡即可進入對應頁面。未來會再擴充更多住宅主題。</p>
     </div>
     <div class="topics" id="topicsGrid"></div>
   `;
   root.appendChild(wrap);
-
   const grid = $("#topicsGrid", wrap);
-  grid.innerHTML = TOPICS.map(t => topicCardHTML(t)).join("");
-  grid.addEventListener("click", e => {
-    const card = e.target.closest(".topic-card");
-    if (!card) return;
-    const slug = card.dataset.slug;
-    const topic = TOPICS.find(tt => tt.slug === slug);
-    if (topic?.available) location.hash = `#/${slug}`;
-  });
-}
-function topicCardHTML(t) {
-  const cls = `topic-card ${t.available ? "available" : "coming"}`;
-  return `
-    <article class="${cls}" data-slug="${t.slug}">
-      <span class="topic-badge">${t.available ? "" : "即將推出"}</span>
+  grid.innerHTML = TOPICS.map(t => `
+    <article class="topic-card" data-slug="${t.slug}">
       <div class="topic-emoji">${t.emoji}</div>
       <div class="topic-title">${escapeHTML(t.title)}</div>
       <div class="topic-desc">${escapeHTML(t.desc)}</div>
-      <div class="topic-actions">
-        <button class="btn ${t.available ? "primary" : ""}">${t.cta}</button>
-      </div>
+      <div class="topic-actions"><button class="btn primary">${t.cta}</button></div>
     </article>
-  `;
+  `).join("");
+
+  grid.addEventListener("click",(e)=>{
+    const card = e.target.closest(".topic-card"); if(!card) return;
+    location.hash = `#/${card.dataset.slug}`;
+  });
 }
 
-/* ======================  Definitions Explorer ====================== */
-const DefState = {
-  data: [],          // 合併後：[{ Country, items:[{TermsUsed, Definition, short, flags}], flagsCombined, termsJoined }]
-  filtered: [],
-  selectedTags: new Set(),
-  selectedCountry: "ALL",
-  searchText: "",
-  compareSet: new Set(),
-};
+/* =========================================================================
+   社宅定義（沿用你之前版本：同國合併、展開全文、加入比較）
+   ======================================================================= */
+const TAG_RULES = [
+  { key:"HasPublicProvider",    label:"公部門提供",     regex:/(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
+  { key:"HasNonProfitProvider", label:"非營利/合作社",   regex:/(non[-\s]?profit|co-?operative|cooperative)/i },
+  { key:"HasBelowMarketRent",   label:"低於市價/租控",    regex:/(below market|rent cap|capped rent|regulated rent|moderate rent)/i },
+  { key:"HasIncomeTargeting",   label:"收入審查/目標族群", regex:/(income limit|low[-\s]?income|vulnerable|eligible|means[-\s]?test)/i },
+  { key:"HasSubsidyOrLoans",    label:"補貼/貸款/稅優惠",  regex:/(subsid(y|ies)|grant(s)?|loan(s)?|tax|preferential rate)/i },
+  { key:"LegalDefined",         label:"法律定義",         regex:/(law|act|defined in law|regulation|legal)/i },
+];
+const DefState = { data:[], filtered:[], selectedTags:new Set(), selectedCountry:"ALL", searchText:"", compareSet:new Set() };
 
-async function renderDefinitions(root) {
+async function renderDefinitions(root){
   const section = document.createElement("section");
-  section.id = "definitionsExplorer";
+  section.id="definitionsExplorer";
   section.innerHTML = `
     <div class="controls fade-in">
-      <div class="searchbox"><input id="searchInput" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" /></div>
-      <div class="selectbox"><select id="countrySelect"></select></div>
-      <div class="tags" id="tagBar"></div>
+      <div class="searchbox"><input id="def_search" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" /></div>
+      <div class="selectbox"><select id="def_country"></select></div>
+      <div class="tags" id="def_tags"></div>
+      <div class="modebox"><a class="btn" href="#/eligibility">→ 前往申請資格</a></div>
     </div>
-
-    <div id="cardsWrap" class="cards fade-in"></div>
-
-    <div id="emptyState" class="empty" style="display:none;">
-      找不到符合條件的結果，換個關鍵字或取消一些標籤看看～
-    </div>
-
-    <aside id="compareDrawer" class="compare-drawer">
+    <div id="def_cards" class="cards fade-in"></div>
+    <div id="def_empty" class="empty" style="display:none;">找不到符合條件的結果</div>
+    <aside id="def_compare" class="compare-drawer">
       <div class="compare-title">比較（最多 3 國）</div>
-      <div id="compareList"></div>
+      <div id="def_compare_list"></div>
       <div class="compare-actions">
-        <button class="btn" id="btnClearCompare">清空</button>
-        <button class="btn primary" id="btnCopyCompare">複製摘要</button>
+        <button class="btn" id="def_clear">清空</button>
+        <button class="btn primary" id="def_copy">複製摘要</button>
       </div>
     </aside>
   `;
   root.appendChild(section);
 
-  await loadDefinitionsCSV();
+  await loadDefinitions();
   buildDefControls();
-  renderDefAll();
+  renderDefCards();
+  renderDefCompare();
 }
 
-async function loadDefinitionsCSV() {
-  try {
-    const resp = await fetch(CSV_URL, { cache: "no-store" });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const text = await resp.text();
-    const rows = csvParse(text);
-    if (!rows.length) throw new Error("CSV 空白");
-    const headers = rows[0].map(h => h.trim());
-    const idxCountry = headers.findIndex(h => /country/i.test(h));
-    const idxTerms   = headers.findIndex(h => /terms?used/i.test(h));
-    const idxDef     = headers.findIndex(h => /definition/i.test(h));
-    if (idxCountry < 0 || idxDef < 0) throw new Error("缺少必要欄位 (Country/Definition)");
+async function loadDefinitions(){
+  const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"});
+  const text = await resp.text();
+  const rows = csvParse(text);
+  const headers = rows[0].map(h=>h.trim());
+  const iC = headers.findIndex(h=>/country/i.test(h));
+  const iT = headers.findIndex(h=>/terms?used/i.test(h));
+  const iD = headers.findIndex(h=>/definition/i.test(h));
+  const raw = rows.slice(1).map(r=>{
+    const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(r[iD]||"").trim();
+    const flags={}; TAG_RULES.forEach(rule=>flags[rule.key]=rule.regex.test(`${TermsUsed}\n${Definition}`));
+    return { Country, TermsUsed, Definition, short: shortText(Definition,200), flags };
+  }).filter(d=>d.Country && d.Definition);
 
-    // 先讀為扁平陣列
-    const raw = rows.slice(1).map(r => {
-      const Country = (r[idxCountry] || "").trim();
-      const TermsUsed = ((idxTerms >= 0 ? r[idxTerms] : "") || "").trim();
-      const Definition = (r[idxDef] || "").trim();
-      const textForMatch = `${TermsUsed}\n${Definition}`;
-      const flags = {};
-      TAG_RULES.forEach(rule => flags[rule.key] = rule.regex.test(textForMatch));
-      return { Country, TermsUsed, Definition, short: shortText(Definition, 200), flags };
-    }).filter(d => d.Country && d.Definition);
-
-    // 依 Country 合併
-    const byCountry = new Map();
-    for (const item of raw) {
-      if (!byCountry.has(item.Country)) {
-        byCountry.set(item.Country, { Country: item.Country, items: [], flagsCombined: {}, termsSet: new Set() });
-      }
-      const grp = byCountry.get(item.Country);
-      grp.items.push({ TermsUsed: item.TermsUsed, Definition: item.Definition, short: item.short, flags: item.flags });
-      if (item.TermsUsed) grp.termsSet.add(item.TermsUsed);
-      // OR flags
-      TAG_RULES.forEach(r => { grp.flagsCombined[r.key] = (grp.flagsCombined[r.key] || item.flags[r.key]); });
-    }
-    const merged = Array.from(byCountry.values()).map(g => ({
-      Country: g.Country,
-      items: g.items,
-      flagsCombined: g.flagsCombined,
-      termsJoined: Array.from(g.termsSet).join("；")
-    })).sort((a,b)=>a.Country.localeCompare(b.Country));
-
-    DefState.data = merged;
-    DefState.filtered = merged.slice();
-  } catch (err) {
-    $("#cardsWrap").innerHTML = `
-      <div class="empty">
-        無法讀取 CSV（${err.message}）。<br/>
-        請確認檔案位於 <code>${CSV_URL}</code>。
-      </div>
-    `;
+  const map = new Map();
+  for(const it of raw){
+    if(!map.has(it.Country)) map.set(it.Country,{Country:it.Country,items:[],flagsCombined:{},termsSet:new Set()});
+    const g=map.get(it.Country);
+    g.items.push(it);
+    if(it.TermsUsed) g.termsSet.add(it.TermsUsed);
+    TAG_RULES.forEach(r=>{ g.flagsCombined[r.key]=(g.flagsCombined[r.key]||it.flags[r.key]); });
   }
+  DefState.data = Array.from(map.values()).map(g=>({
+    Country:g.Country, items:g.items, flagsCombined:g.flagsCombined, termsJoined:Array.from(g.termsSet).join("；")
+  })).sort((a,b)=>a.Country.localeCompare(b.Country));
+  DefState.filtered = DefState.data.slice();
 }
 
-function buildDefControls() {
-  const uniqueCountries = Array.from(new Set(DefState.data.map(d => d.Country))).sort((a,b)=>a.localeCompare(b));
-  const sel = $("#countrySelect");
-  sel.innerHTML = `<option value="ALL">全部國家</option>` + uniqueCountries.map(c => `<option>${escapeHTML(c)}</option>`).join("");
-  sel.addEventListener("change", e => { DefState.selectedCountry = e.target.value; applyDefFilters(); });
+function buildDefControls(){
+  const countries = Array.from(new Set(DefState.data.map(d=>d.Country))).sort((a,b)=>a.localeCompare(b));
+  $("#def_country").innerHTML = `<option value="ALL">全部國家</option>` + countries.map(c=>`<option>${escapeHTML(c)}</option>`).join("");
+  $("#def_country").addEventListener("change",e=>{DefState.selectedCountry=e.target.value;applyDefFilters();});
 
-  $("#searchInput").addEventListener("input", e => { DefState.searchText = e.target.value.trim(); applyDefFilters(); });
+  $("#def_search").addEventListener("input",e=>{DefState.searchText=e.target.value.trim();applyDefFilters();});
 
-  const tagBar = $("#tagBar");
-  tagBar.innerHTML = TAG_RULES.map(t => `<button class="tag" data-key="${t.key}">${t.label}</button>`).join("");
-  tagBar.addEventListener("click", e => {
-    const btn = e.target.closest(".tag"); if (!btn) return;
-    const key = btn.dataset.key;
-    if (DefState.selectedTags.has(key)) DefState.selectedTags.delete(key); else DefState.selectedTags.add(key);
-    btn.classList.toggle("active");
-    applyDefFilters();
+  $("#def_tags").innerHTML = TAG_RULES.map(t=>`<button class="tag" data-key="${t.key}">${t.label}</button>`).join("");
+  $("#def_tags").addEventListener("click",e=>{
+    const btn=e.target.closest(".tag"); if(!btn) return;
+    const k=btn.dataset.key; if(DefState.selectedTags.has(k)) DefState.selectedTags.delete(k); else DefState.selectedTags.add(k);
+    btn.classList.toggle("active"); applyDefFilters();
   });
 
-  $("#btnClearCompare").addEventListener("click", () => {
-    DefState.compareSet.clear(); renderDefCompare();
-    $$(".card input[type='checkbox']").forEach(cb => (cb.checked = false));
+  $("#def_clear").addEventListener("click",()=>{DefState.compareSet.clear();renderDefCompare();$$("#def_cards input.cmp").forEach(cb=>cb.checked=false);});
+  $("#def_copy").addEventListener("click",async()=>{
+    const arr=Array.from(DefState.compareSet);
+    if(!arr.length) return;
+    const txt = arr.map(c=>{
+      const d=DefState.data.find(x=>x.Country===c);
+      const bullets = deriveDefBullets(d).join("；");
+      const terms = d.termsJoined || (d.items[0]?.TermsUsed||"—");
+      return `國家：${d.Country}${d.items.length>1?`（${d.items.length} 個定義）`:""}\n稱呼：${terms}\n重點：${bullets}`;
+    }).join("\n\n");
+    try{ await navigator.clipboard.writeText(txt); alert("已複製比較摘要！"); }catch{ alert("複製失敗，請手動選取文字。"); }
   });
-  $("#btnCopyCompare").addEventListener("click", copyDefCompare);
 }
-
-function applyDefFilters() {
-  const q = DefState.searchText.toLowerCase();
-  DefState.filtered = DefState.data.filter(d => {
-    if (DefState.selectedCountry !== "ALL" && d.Country !== DefState.selectedCountry) return false;
-    // tag filters: 全部成立（對合併旗標）
-    for (const key of DefState.selectedTags) if (!d.flagsCombined[key]) return false;
-    // 文字搜尋：country + 所有 terms + 所有 definitions
-    if (q) {
-      const hay = [
-        d.Country,
-        d.termsJoined,
-        ...d.items.map(i => i.Definition)
-      ].join(" ").toLowerCase();
-      if (!hay.includes(q)) return false;
+function applyDefFilters(){
+  const q=DefState.searchText.toLowerCase();
+  DefState.filtered = DefState.data.filter(d=>{
+    if(DefState.selectedCountry!=="ALL"&&d.Country!==DefState.selectedCountry) return false;
+    for(const key of DefState.selectedTags) if(!d.flagsCombined[key]) return false;
+    if(q){
+      const hay=[d.Country,d.termsJoined,...d.items.map(i=>i.Definition)].join(" ").toLowerCase();
+      if(!hay.includes(q)) return false;
     }
     return true;
   });
   renderDefCards();
 }
-
-function renderDefAll() { renderDefCards(); renderDefCompare(); }
-
-function renderDefCards() {
-  const wrap = $("#cardsWrap");
-  const empty = $("#emptyState");
-  if (!DefState.filtered.length) {
-    wrap.innerHTML = ""; empty.style.display = "block"; return;
-  }
-  empty.style.display = "none";
-  wrap.innerHTML = DefState.filtered.map((d, idx) => defCardHTML(d, idx)).join("");
-  wrap.addEventListener("click", onDefCardClick, { once: true });
-}
-
-function defCardHTML(d, idx) {
-  // Chips from combined flags
-  const chips = TAG_RULES.filter(t => d.flagsCombined[t.key]).slice(0, 3)
-               .map(t => `<span class="chip">${t.label}</span>`).join("");
-
-  const checked = DefState.compareSet.has(d.Country) ? "checked" : "";
-  const safeCountry = escapeHTML(d.Country);
-  const safeTerms   = escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"));
-
-  // Summary 用第一筆的 short
-  const safeShort   = escapeHTML(d.items[0]?.short || "");
-
-  // 多筆定義 → show badge + 逐段列出
-  const multiple = d.items.length > 1;
-  const variantsHTML = d.items.map((it, i) => {
-    const t = escapeHTML(it.TermsUsed || "—");
-    const full = escapeHTML(it.Definition);
-    return `
+function renderDefCards(){
+  const wrap=$("#def_cards"), empty=$("#def_empty");
+  if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
+  empty.style.display="none";
+  wrap.innerHTML = DefState.filtered.map((d,idx)=>{
+    const chips = TAG_RULES.filter(t=>d.flagsCombined[t.key]).slice(0,3).map(t=>`<span class="chip">${t.label}</span>`).join("");
+    const checked = DefState.compareSet.has(d.Country) ? "checked" : "";
+    const multiple = d.items.length>1;
+    const variants = d.items.map((it,i)=>`
       <div class="variant">
-        <div class="variant-header"><span class="vindex">#${i+1}</span>${t}</div>
-        <div class="variant-body">${full}</div>
-      </div>
-    `;
+        <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
+        <div class="variant-body">${escapeHTML(it.Definition)}</div>
+      </div>`).join("");
+    return `
+      <article class="card ${multiple?"multiple":""}">
+        <div class="card-header">
+          <div>
+            <div class="country">${escapeHTML(d.Country)}</div>
+            <div class="terms">${escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"))}</div>
+          </div>
+          <label class="mini"><input type="checkbox" class="cmp" data-country="${escapeHTML(d.Country)}" ${checked}/> 加入比較</label>
+        </div>
+        <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
+        <div class="actions">
+          <button class="btn toggle">展開全文</button>
+          ${multiple?`<span class="badge">共 ${d.items.length} 個定義</span>`:""}
+          <div class="chips">${chips}</div>
+        </div>
+        <div class="fulltext" style="display:none;">${variants}</div>
+        <div class="actions" style="margin-top:8px">
+          <a class="btn" href="#/eligibility">→ 查看此國家申請資格</a>
+        </div>
+      </article>`;
   }).join("");
 
+  // 事件委派
+  wrap.onclick = (e)=>{
+    const btn = e.target.closest(".toggle");
+    const cmp = e.target.closest("input.cmp");
+    if(btn){
+      const card = e.target.closest(".card");
+      const full = $(".fulltext",card);
+      const open = full.style.display!=="none";
+      full.style.display = open ? "none":"block";
+      btn.textContent = open ? "展開全文" : "收合全文";
+    }else if(cmp){
+      const c=cmp.dataset.country;
+      if(cmp.checked){
+        if(DefState.compareSet.size>=3){ cmp.checked=false; alert("一次最多比較 3 個國家"); return; }
+        DefState.compareSet.add(c);
+      }else DefState.compareSet.delete(c);
+      renderDefCompare();
+    }
+  };
+}
+function renderDefCompare(){
+  const drawer=$("#def_compare"), list=$("#def_compare_list"), arr=Array.from(DefState.compareSet);
+  if(!arr.length){drawer.classList.remove("open"); list.innerHTML=`<div class="mini" style="color:#64748b;">尚未選擇國家。勾選卡片右上「加入比較」。</div>`; return;}
+  drawer.classList.add("open");
+  list.innerHTML = arr.map(c=>{
+    const d=DefState.data.find(x=>x.Country===c);
+    const bullets = deriveDefBullets(d).map(b=>`• ${escapeHTML(b)}`).join("<br>");
+    const terms = d.termsJoined || (d.items[0]?.TermsUsed || "—");
+    return `<div class="compare-item"><h4>${escapeHTML(d.Country)}${d.items.length>1?`（${d.items.length} 個定義）`:""}</h4><div class="mini"><strong>稱呼：</strong>${escapeHTML(terms)}</div><div class="mini" style="margin-top:4px">${bullets}</div></div>`;
+  }).join("");
+}
+function deriveDefBullets(d){
+  const f=d.flagsCombined||{}; const out=[];
+  if(f.HasPublicProvider) out.push("由公部門/地方政府提供或管理");
+  if(f.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
+  if(f.HasBelowMarketRent) out.push("租金低於市價或受管制");
+  if(f.HasIncomeTargeting) out.push("針對低收入/弱勢族群，需收入審查");
+  if(f.HasSubsidyOrLoans) out.push("提供補貼/貸款/稅務優惠等支持");
+  if(f.LegalDefined) out.push("有法律/法規上的明確定義");
+  if(!out.length) out.push(shortText(d.items[0]?.Definition||"",120));
+  return out.slice(0,5);
+}
+
+/* =========================================================================
+   申請資格（Eligibility）— 矩陣 + 卡片 + 搜尋/篩選
+   ======================================================================= */
+const EliState = { raw:[], view:"matrix", search:"", filters:new Set(["All","Inc","PR","Res","Emp"]) }; // 開站先顯示全部欄位
+
+async function renderEligibility(root){
+  const sec=document.createElement("section");
+  sec.id="eligibility";
+  sec.innerHTML = `
+    <div class="controls fade-in">
+      <div class="searchbox"><input id="eli_search" type="text" placeholder="搜尋國家或備註…" /></div>
+      <div class="selectbox">
+        <select id="eli_sort">
+          <option value="az">排序：國名 A→Z</option>
+          <option value="score">排序：限制條件數（多→少）</option>
+        </select>
+      </div>
+      <div class="modebox">
+        <select id="eli_mode">
+          <option value="matrix">顯示：矩陣</option>
+          <option value="cards">顯示：卡片</option>
+        </select>
+      </div>
+      <div class="tags" id="eli_quick">
+        <button class="tag" data-q="AllEligible:Yes">開放所有人</button>
+        <button class="tag" data-q="IncomeThreshold:Yes">有收入門檻</button>
+        <button class="tag" data-q="CitizenshipOrPR:Yes">需公民/PR</button>
+        <button class="tag" data-q="LocalResidency:Yes">需在地居住</button>
+        <button class="tag" data-q="Employment:Yes">需就業</button>
+        <a class="btn" href="#/definitions">← 回到社宅定義</a>
+      </div>
+    </div>
+
+    <div id="eli_mount" class="fade-in"></div>
+    <div id="eli_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
+  `;
+  root.appendChild(sec);
+
+  await loadEligibility();
+  bindEligibilityControls();
+  renderEligibilityView();
+}
+
+async function loadEligibility(){
+  const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"});
+  const text = await resp.text();
+  const rows = csvParse(text);
+  const h = rows[0].map(x=>x.trim());
+  const idx = (name)=>h.findIndex(k=>k.toLowerCase()===name.toLowerCase());
+
+  const m = {
+    Country: idx("Country"),
+    CountryNormalized: idx("Country_Normalized"),
+    All: idx("AllEligible"),
+    Inc: idx("IncomeThreshold"),
+    PR: idx("CitizenshipOrPR"),
+    Res: idx("LocalResidency"),
+    Emp: idx("Employment"),
+    Note: idx("OtherNotes"),
+  };
+  EliState.raw = rows.slice(1).map(r=>({
+    c: (r[m.Country]||"").trim(),
+    cn: (r[m.CountryNormalized]||"").trim() || (r[m.Country]||"").trim(),
+    All: (r[m.All]||"NA").trim(),
+    Inc: (r[m.Inc]||"NA").trim(),
+    PR:  (r[m.PR] ||"NA").trim(),
+    Res: (r[m.Res]||"NA").trim(),
+    Emp: (r[m.Emp]||"NA").trim(),
+    Note:(r[m.Note]||"").trim()
+  })).filter(x=>x.c);
+}
+
+function bindEligibilityControls(){
+  $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
+  $("#eli_sort").addEventListener("change",renderEligibilityView);
+  $("#eli_mode").addEventListener("change",e=>{EliState.view=e.target.value; renderEligibilityView();});
+  $("#eli_quick").addEventListener("click",(e)=>{
+    const t=e.target.closest(".tag"); if(!t) return;
+    const [k,v]=t.dataset.q.split(":"); // 欄位:Yes
+    const sel = $("#eli_search"); sel.value = ""; EliState.search="";
+    // 單一條件快速過濾：把非 NA 且等於 v 的留下
+    EliState.quick = { key:k, val:v };
+    renderEligibilityView();
+  });
+}
+
+function filterEligibility(data){
+  const q = EliState.search;
+  const quick = EliState.quick; // {key,val} or undefined
+  return data.filter(d=>{
+    if(q){
+      const hay = [d.c,d.cn,d.All,d.Inc,d.PR,d.Res,d.Emp,d.Note].join(" ").toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    if(quick){
+      const val = d[shortKey(quick.key)];
+      if(!val || val.toUpperCase()!==quick.val.toUpperCase()) return false;
+    }
+    return true;
+  });
+}
+function shortKey(k){ return ({AllEligible:"All",IncomeThreshold:"Inc",CitizenshipOrPR:"PR",LocalResidency:"Res",Employment:"Emp"})[k] || k; }
+function sortEligibility(arr){
+  const how = $("#eli_sort").value;
+  if(how==="score"){
+    // Yes = 1（為限制/門檻），No/NA=0；分數高表示條件多
+    const score = d => ["Inc","PR","Res","Emp"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0), 0);
+    arr.sort((a,b)=>score(b)-score(a) || a.cn.localeCompare(b.cn));
+  }else{
+    arr.sort((a,b)=>a.cn.localeCompare(b.cn));
+  }
+}
+
+function renderEligibilityView(){
+  const mount=$("#eli_mount"), empty=$("#eli_empty");
+  let data = filterEligibility(EliState.raw.slice());
+  sortEligibility(data);
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; }
+  empty.style.display="none";
+
+  if(EliState.view==="matrix") mount.innerHTML = renderMatrix(data);
+  else mount.innerHTML = renderEliCards(data);
+}
+
+function pill(val){
+  const v = String(val||"NA").trim().toUpperCase();
+  if(v==="YES") return `<span class="pill y">YES</span>`;
+  if(v==="NO")  return `<span class="pill n">NO</span>`;
+  return `<span class="pill na">NA</span>`;
+}
+function renderMatrix(data){
   return `
-    <article class="card ${multiple ? "multiple" : ""}" data-idx="${idx}">
-      <div class="card-header">
-        <div>
-          <div class="country">${safeCountry}</div>
-          <div class="terms">${safeTerms}</div>
-        </div>
-        <label class="mini">
-          <input type="checkbox" class="cmp" data-country="${safeCountry}" ${checked} />
-          加入比較
-        </label>
-      </div>
-
-      <div class="summary">${safeShort}</div>
-
-      <div class="actions">
-        <button class="btn toggle">展開全文</button>
-        ${multiple ? `<span class="badge">共 ${d.items.length} 個定義</span>` : ""}
-        <div class="chips">${chips}</div>
-      </div>
-
-      <div class="fulltext" style="display:none;">
-        ${variantsHTML}
-      </div>
-    </article>
+    <div class="matrix">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Country</th>
+            <th>All eligible</th>
+            <th>Income</th>
+            <th>Citizenship/PR</th>
+            <th>Local residency</th>
+            <th>Employment</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(d=>`
+            <tr>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
+              <td>${pill(d.All)}</td>
+              <td>${pill(d.Inc)}</td>
+              <td>${pill(d.PR)}</td>
+              <td>${pill(d.Res)}</td>
+              <td>${pill(d.Emp)}</td>
+              <td class="note">${escapeHTML(d.Note||"")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="actions" style="margin:10px 0">
+      <a class="btn" href="#/definitions">← 回到社宅定義</a>
+    </div>
   `;
 }
-
-function onDefCardClick(e) {
-  const btn = e.target.closest(".toggle");
-  const cmp = e.target.closest("input.cmp");
-  if (btn) {
-    const card = e.target.closest(".card");
-    const full = $(".fulltext", card);
-    const open = full.style.display !== "none";
-    full.style.display = open ? "none" : "block";
-    btn.textContent = open ? "展開全文" : "收合全文";
-  } else if (cmp) {
-    const country = cmp.dataset.country;
-    if (cmp.checked) {
-      if (DefState.compareSet.size >= 3) {
-        cmp.checked = false; alert("一次最多比較 3 個國家"); return;
-      }
-      DefState.compareSet.add(country);
-    } else {
-      DefState.compareSet.delete(country);
-    }
-    renderDefCompare();
-  }
-  $("#cardsWrap").addEventListener("click", onDefCardClick, { once: true });
-}
-
-function renderDefCompare() {
-  const drawer = $("#compareDrawer");
-  const list = $("#compareList");
-  const arr = Array.from(DefState.compareSet);
-
-  if (!arr.length) {
-    drawer.classList.remove("open");
-    list.innerHTML = `<div class="mini" style="color:#64748b;">尚未選擇國家。勾選卡片右上「加入比較」。</div>`;
-    return;
-  }
-  drawer.classList.add("open");
-
-  const items = arr.map((c) => {
-    const d = DefState.data.find(x => x.Country === c);
-    const bullets = deriveDefBullets(d).map(b => `• ${escapeHTML(b)}`).join("<br>");
-    const terms = d.termsJoined || (d.items[0]?.TermsUsed || "—");
-    const multiNote = d.items.length > 1 ? `（${d.items.length} 個定義）` : "";
-    return `
-      <div class="compare-item">
-        <h4>${escapeHTML(d.Country)}${multiNote}</h4>
-        <div class="mini"><strong>稱呼：</strong>${escapeHTML(terms)}</div>
-        <div class="mini" style="margin-top:4px">${bullets}</div>
-      </div>
-    `;
-  }).join("");
-
-  list.innerHTML = items;
-}
-
-function deriveDefBullets(d) {
-  const f = d.flagsCombined || {};
-  const out = [];
-  if (f.HasPublicProvider)    out.push("由公部門/地方政府提供或管理");
-  if (f.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
-  if (f.HasBelowMarketRent)   out.push("租金低於市價或受管制");
-  if (f.HasIncomeTargeting)   out.push("針對低收入/弱勢族群，需收入審查");
-  if (f.HasSubsidyOrLoans)    out.push("提供補貼/貸款/稅務優惠等支持");
-  if (f.LegalDefined)         out.push("有法律/法規上的明確定義");
-  if (!out.length) out.push(shortText(d.items[0]?.Definition || "", 120));
-  return out.slice(0, 5);
-}
-
-async function copyDefCompare() {
-  try {
-    const arr = Array.from(DefState.compareSet);
-    if (!arr.length) return;
-    const blocks = arr.map(c => {
-      const d = DefState.data.find(x => x.Country === c);
-      const lines = [
-        `國家：${d.Country}${d.items.length>1 ? `（${d.items.length} 個定義）` : ""}`,
-        `稱呼：${d.termsJoined || (d.items[0]?.TermsUsed || "—")}`,
-        `重點：${deriveDefBullets(d).join("；")}`,
-      ];
-      return lines.join("\n");
-    });
-    await navigator.clipboard.writeText(blocks.join("\n\n"));
-    alert("已複製比較摘要！");
-  } catch {
-    alert("複製失敗，請手動選取文字。");
-  }
+function renderEliCards(data){
+  return `
+    <div class="cards">
+      ${data.map(d=>`
+        <article class="card">
+          <div class="card-header">
+            <div class="country">${escapeHTML(d.c)}</div>
+          </div>
+          <div class="summary">
+            <span class="chip">All: ${pill(d.All)}</span>
+            <span class="chip">Income: ${pill(d.Inc)}</span>
+            <span class="chip">Cit/PR: ${pill(d.PR)}</span>
+            <span class="chip">Residency: ${pill(d.Res)}</span>
+            <span class="chip">Employment: ${pill(d.Emp)}</span>
+          </div>
+          <div class="fulltext" style="margin-top:10px">${escapeHTML(d.Note||"") || "<span class='note'>—</span>"}</div>
+          <div class="actions" style="margin-top:10px">
+            <a class="btn" href="#/definitions">查看定義</a>
+          </div>
+        </article>
+      `).join("")}
+    </div>
+  `;
 }
