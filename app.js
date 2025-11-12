@@ -1,22 +1,47 @@
 // app.js
 
-// =========================
-// GitHub 設定（已幫你填好）
-// =========================
-//
-// 這裡我用的是你給的這個 commit：
-// 54eb88edd1cab3fcb88c82e0288e93ba87694270
-// 這樣就算 main 之後有更新，這版也能讀到那一版的資料。
-// 如果你要讀最新 main，把 GITHUB_REF 改成 "main" 就好。
+// ===== 0. GitHub 設定（用你給的那個 commit） =====
 const GITHUB_OWNER = "PN0929";
 const GITHUB_REPO = "globalhousingdata";
-const GITHUB_REF = "54eb88edd1cab3fcb88c82e0288e93ba87694270"; // or "main"
-const GITHUB_DIR = "OECD DATA"; // 資料夾名稱
+const GITHUB_REF = "54eb88edd1cab3fcb88c82e0288e93ba87694270";
+const GITHUB_DIR = "OECD DATA";
 
-// =========================
-// DOM 抓取
-// =========================
+// 要排除的國家（口徑可能不一樣）
+const EXCLUDE_CODES = ["TWN", "Taiwan", "TAIWAN"];
+
+// ===== 1. 主題定義（MVP 用寫死的） =====
+const TOPICS = [
+  {
+    id: "afford",
+    name: "住宅負擔",
+    // OECD 資料你原本分 HC/HM/PH，我在這裡先用檔名裡面的代碼去猜
+    match: ["HM", "HC"],
+    insight: "這一組指標主要用來看「住得起」的問題，建議先看最新年份的各國比較，再往回看時間變化。"
+  },
+  {
+    id: "market",
+    name: "住宅市場",
+    match: ["HM"],
+    insight: "住宅市場指標可以用來觀察價格與租金的變化，搭配年份切換可以看到市場的波動。"
+  },
+  {
+    id: "condition",
+    name: "住宅條件",
+    match: ["HC"],
+    insight: "住宅條件指標多半和擁擠度、設備有關，適合做各國水準的橫向比較。"
+  },
+  {
+    id: "policy",
+    name: "住宅政策",
+    match: ["PH"],
+    insight: "住宅政策類的指標較偏向政府補助與支出，可能不是每個國家都有資料。"
+  }
+];
+
+let currentTopicId = "afford";
+
 const datasetListEl = document.getElementById("datasetList");
+const topicListEl = document.getElementById("topicList");
 const welcomeScreenEl = document.getElementById("welcomeScreen");
 const visualizationAreaEl = document.getElementById("visualizationArea");
 const currentDatasetTitleEl = document.getElementById("currentDatasetTitle");
@@ -26,114 +51,152 @@ const statisticsPanelEl = document.getElementById("statisticsPanel");
 const chartTypeSelect = document.getElementById("chartType");
 const downloadBtn = document.getElementById("downloadBtn");
 const lastUpdateEl = document.getElementById("lastUpdate");
+const insightBoxEl = document.getElementById("insightBox");
 const sidebarToggleBtn = document.getElementById("sidebarToggle");
 const sidebarEl = document.querySelector(".sidebar");
 
 let currentChart = null;
 let currentRawRows = [];
 let currentDatasetFile = null;
+let allFiles = [];
 
-// =========================
-// 初始化
-// =========================
+// ===== DOMContentLoaded =====
 document.addEventListener("DOMContentLoaded", () => {
+  renderTopicButtons();
   loadGitHubDatasets();
   setLastUpdateToday();
   bindGlobalEvents();
 });
 
-// =========================
-// 取得 GitHub 資料夾內的檔案
-// GET https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}
-// =========================
+// ===== 2. 畫主題按鈕 =====
+function renderTopicButtons() {
+  topicListEl.innerHTML = "";
+  TOPICS.forEach((topic, index) => {
+    const btn = document.createElement("button");
+    btn.className = "filter-btn" + (index === 0 ? " active" : "");
+    btn.textContent = topic.name;
+    btn.dataset.topicId = topic.id;
+    btn.addEventListener("click", () => {
+      // 切 active
+      topicListEl
+        .querySelectorAll(".filter-btn")
+        .forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      currentTopicId = topic.id;
+      // 用現在的 files 再畫一次 dataset
+      filterAndRenderDatasets();
+      // 更新 insight
+      renderInsightForTopic();
+      // 回到歡迎 or 保留內容都可以，這裡我們不清空右側，除非你要
+    });
+    topicListEl.appendChild(btn);
+  });
+}
+
+// ===== 3. 讀 GitHub 資料夾 =====
 async function loadGitHubDatasets() {
   const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(
     GITHUB_DIR
   )}?ref=${GITHUB_REF}`;
-
   datasetListEl.innerHTML = `<div class="loading">載入數據集中…</div>`;
-
   try {
     const res = await fetch(apiUrl);
-    if (!res.ok) {
-      throw new Error("無法取得 GitHub 資料夾內容");
-    }
+    if (!res.ok) throw new Error("無法取得 GitHub 資料夾內容");
     const files = await res.json();
-
-    const xlsxFiles = files.filter(
+    // 留起來給主題篩
+    allFiles = files.filter(
       (f) =>
         f.type === "file" &&
         (f.name.toLowerCase().endsWith(".xlsx") ||
           f.name.toLowerCase().endsWith(".xls"))
     );
-
-    if (!xlsxFiles.length) {
-      datasetListEl.innerHTML = `<p>這個資料夾裡沒有 Excel 檔 (.xlsx / .xls)</p>`;
-      return;
-    }
-
-    renderDatasetList(xlsxFiles);
+    filterAndRenderDatasets();
   } catch (err) {
     console.error(err);
     datasetListEl.innerHTML = `<p style="color:#ef4444">載入失敗：${err.message}</p>`;
   }
 }
 
-// =========================
-// 畫左側清單
-// =========================
-function renderDatasetList(files) {
+// ===== 4. 依照目前主題把 dataset 列出來 =====
+function filterAndRenderDatasets() {
+  const topic = TOPICS.find((t) => t.id === currentTopicId);
   datasetListEl.innerHTML = "";
 
-  files.forEach((file) => {
+  if (!allFiles.length) {
+    datasetListEl.innerHTML = `<p>沒有可用的檔案</p>`;
+    return;
+  }
+
+  // 用檔名裡的 HC / HM / PH 去猜它屬於哪一類
+  const matchedFiles = allFiles.filter((file) => {
+    if (!topic) return true;
+    const upperName = file.name.toUpperCase();
+    return topic.match.some((code) => upperName.includes(code));
+  });
+
+  if (!matchedFiles.length) {
+    datasetListEl.innerHTML = `<p>這個主題暫時沒有對應的指標</p>`;
+    return;
+  }
+
+  matchedFiles.forEach((file) => {
     const item = document.createElement("div");
     item.className = "dataset-item";
     item.dataset.filepath = file.path;
-
     item.innerHTML = `
       <div class="dataset-code">${file.name.replace(/\.xlsx?$/i, "")}</div>
       <div class="dataset-name">${file.path}</div>
     `;
-
     item.addEventListener("click", () => {
       datasetListEl
         .querySelectorAll(".dataset-item")
         .forEach((el) => el.classList.remove("active"));
       item.classList.add("active");
+
       currentDatasetFile = file;
       loadDatasetFileFromGitHub(file);
     });
-
     datasetListEl.appendChild(item);
   });
+
+  // 顯示該主題的說明
+  renderInsightForTopic();
 }
 
-// =========================
-// 下載單一 xlsx 並解析
-// raw 位置：
-// https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}
-// =========================
+// ===== 5. 貼主題的 insight =====
+function renderInsightForTopic() {
+  const topic = TOPICS.find((t) => t.id === currentTopicId);
+  if (!insightBoxEl) return;
+  insightBoxEl.innerHTML = `
+    <h4>如何看這個主題？</h4>
+    <p>${topic ? topic.insight : "從左側選擇一個資料集，系統會幫你畫出常見的圖表。先看最新年份的橫向比較會最直覺。"}</p>
+  `;
+}
+
+// ===== 6. 下載 xlsx 並解析 =====
 async function loadDatasetFileFromGitHub(file) {
   const rawUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${file.path}`;
-
   try {
     const res = await fetch(rawUrl);
-    if (!res.ok) {
-      throw new Error("無法下載檔案：" + file.name);
-    }
+    if (!res.ok) throw new Error("無法下載檔案：" + file.name);
     const arrayBuffer = await res.arrayBuffer();
-
-    // XLSX 已在 HTML 中載入
     const workbook = XLSX.read(arrayBuffer, { type: "array" });
     const firstSheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[firstSheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
-    currentRawRows = rows;
+    // 排除台灣
+    const cleaned = rows.filter((row) => {
+      const values = Object.values(row).map((v) => (v != null ? String(v) : ""));
+      return !values.some((v) => EXCLUDE_CODES.includes(v));
+    });
+
+    currentRawRows = cleaned;
 
     showVisualizationArea();
     renderDatasetTitle(file.name);
-    renderFiltersFromData(rows);
+    renderFiltersFromData(cleaned);
     renderAllFromFilters();
   } catch (err) {
     console.error(err);
@@ -141,32 +204,31 @@ async function loadDatasetFileFromGitHub(file) {
   }
 }
 
-// =========================
-// 切畫面
-// =========================
+// ===== 7. 顯示可視化區 =====
 function showVisualizationArea() {
   if (welcomeScreenEl) welcomeScreenEl.hidden = true;
   if (visualizationAreaEl) visualizationAreaEl.hidden = false;
 }
 
-// =========================
-// 顯示目前的檔名
-// =========================
+// ===== 8. 指標標題 =====
 function renderDatasetTitle(name) {
   currentDatasetTitleEl.textContent = name.replace(/\.xlsx?$/i, "");
 }
 
-// =========================
-// 從 xlsx 的欄位自動產生篩選器
-// 嘗試抓出「國家、年份、數值」三種欄位
-// =========================
+// ===== 9. 依照資料猜欄位 + 產下拉 =====
 function renderFiltersFromData(rows) {
-  dataFiltersEl.innerHTML = "";
+  dataFiltersEl.dataset.countryKey = "";
+  dataFiltersEl.dataset.yearKey = "";
+  dataFiltersEl.dataset.valueKey = "";
+
+  // insight 已經在上面了，這裡只塞篩選器
+  const oldFilters = dataFiltersEl.querySelectorAll(".filter-group");
+  oldFilters.forEach((el) => el.remove());
+
   if (!rows || !rows.length) return;
 
   const colNames = Object.keys(rows[0]);
 
-  // 猜欄位
   const countryKey =
     colNames.find((c) =>
       ["location", "LOCATION", "country", "Country", "COUNTRY"].includes(c)
@@ -180,12 +242,10 @@ function renderFiltersFromData(rows) {
       ["value", "Value", "VALUE", "OBS_VALUE", "obs_value"].includes(c)
     ) || colNames[2];
 
-  // 先收起來之後用
   dataFiltersEl.dataset.countryKey = countryKey;
   dataFiltersEl.dataset.yearKey = yearKey;
   dataFiltersEl.dataset.valueKey = valueKey;
 
-  // 產 unique
   const countries = Array.from(
     new Set(rows.map((r) => r[countryKey]).filter(Boolean))
   );
@@ -193,7 +253,6 @@ function renderFiltersFromData(rows) {
     new Set(rows.map((r) => r[yearKey]).filter(Boolean))
   ).sort();
 
-  // 國家選單
   const countryGroup = document.createElement("div");
   countryGroup.className = "filter-group";
   countryGroup.innerHTML = `
@@ -203,7 +262,7 @@ function renderFiltersFromData(rows) {
       ${countries.map((c) => `<option value="${c}">${c}</option>`).join("")}
     </select>
   `;
-  // 年份選單
+
   const yearGroup = document.createElement("div");
   yearGroup.className = "filter-group";
   yearGroup.innerHTML = `
@@ -225,9 +284,7 @@ function renderFiltersFromData(rows) {
     .addEventListener("change", renderAllFromFilters);
 }
 
-// =========================
-// 篩完之後：畫圖 + 表格 + 統計
-// =========================
+// ===== 10. 篩選後 → 畫圖、表格、統計 =====
 function renderAllFromFilters() {
   if (!currentRawRows.length) return;
 
@@ -244,10 +301,7 @@ function renderAllFromFilters() {
   let filtered = currentRawRows.filter((row) => {
     let ok = true;
     if (selectedCountry !== "__all" && row[cKey] !== selectedCountry) ok = false;
-    if (
-      selectedYear !== "__all" &&
-      String(row[yKey]) !== String(selectedYear)
-    )
+    if (selectedYear !== "__all" && String(row[yKey]) !== String(selectedYear))
       ok = false;
     return ok;
   });
@@ -257,9 +311,7 @@ function renderAllFromFilters() {
   renderStats(filtered, vKey);
 }
 
-// =========================
-// 畫 Chart.js
-// =========================
+// ===== 11. 畫圖（含自動判斷類型） =====
 function renderChartFromData(rows, keys) {
   const { countryKey, yearKey, valueKey } = keys;
   const canvas = document.getElementById("mainChart");
@@ -268,7 +320,19 @@ function renderChartFromData(rows, keys) {
 
   if (currentChart) currentChart.destroy();
 
-  const selectedChartType = chartTypeSelect ? chartTypeSelect.value : "line";
+  // 使用者選的
+  let selectedChartType = chartTypeSelect ? chartTypeSelect.value : "auto";
+
+  // 自動判斷：如果有很多年份 → line，否則 bar
+  if (selectedChartType === "auto") {
+    const uniqYears = new Set(rows.map((r) => r[yearKey]));
+    if (uniqYears.size > 3) {
+      selectedChartType = "line";
+    } else {
+      selectedChartType = "bar";
+    }
+  }
+
   const isHorizontal = selectedChartType === "bar-horizontal";
 
   const uniqueCountries = Array.from(
@@ -282,14 +346,14 @@ function renderChartFromData(rows, keys) {
   let data = [];
 
   if (uniqueCountries.length === 1) {
-    // 單一國家 → X 軸用年份
+    // 單一國家 → 用年份
     labels = uniqueYears;
     data = labels.map((y) => {
       const found = rows.find((r) => String(r[yearKey]) === String(y));
       return found ? Number(found[valueKey]) : null;
     });
   } else {
-    // 多國家 → X 軸用國家，取該國最新年份那筆
+    // 多國家 → 用國家，取最新一筆
     labels = uniqueCountries;
     data = labels.map((c) => {
       const countryRows = rows.filter((r) => r[countryKey] === c);
@@ -310,9 +374,9 @@ function renderChartFromData(rows, keys) {
           label: "Value",
           data,
           borderWidth: 2,
-          fill: false,
-        },
-      ],
+          fill: false
+        }
+      ]
     },
     options: {
       responsive: true,
@@ -320,30 +384,24 @@ function renderChartFromData(rows, keys) {
       indexAxis: isHorizontal ? "y" : "x",
       scales: {
         y: {
-          beginAtZero: true,
-        },
-      },
-    },
+          beginAtZero: true
+        }
+      }
+    }
   });
 }
 
-// =========================
-// 表格
-// =========================
+// ===== 12. 表格 =====
 function renderTable(rows) {
   if (!dataTableEl) return;
   if (!rows || !rows.length) {
     dataTableEl.innerHTML = "<p>沒有符合篩選條件的資料。</p>";
     return;
   }
-
   const cols = Object.keys(rows[0]);
   let thead = "<thead><tr>";
-  cols.forEach((c) => {
-    thead += `<th>${c}</th>`;
-  });
+  cols.forEach((c) => (thead += `<th>${c}</th>`));
   thead += "</tr></thead>";
-
   let tbody = "<tbody>";
   rows.forEach((row) => {
     tbody += "<tr>";
@@ -353,34 +411,23 @@ function renderTable(rows) {
     tbody += "</tr>";
   });
   tbody += "</tbody>";
-
-  dataTableEl.innerHTML = `
-    <table>
-      ${thead}
-      ${tbody}
-    </table>
-  `;
+  dataTableEl.innerHTML = `<table>${thead}${tbody}</table>`;
 }
 
-// =========================
-// 統計卡片
-// =========================
+// ===== 13. 統計 =====
 function renderStats(rows, valueKey) {
   if (!statisticsPanelEl) return;
   if (!rows || !rows.length) {
     statisticsPanelEl.innerHTML = "";
     return;
   }
-
   const nums = rows
     .map((r) => Number(r[valueKey]))
     .filter((n) => !isNaN(n));
-
   const count = nums.length;
   const min = Math.min(...nums);
   const max = Math.max(...nums);
   const avg = nums.reduce((a, b) => a + b, 0) / (nums.length || 1);
-
   statisticsPanelEl.innerHTML = `
     <div class="stat-card">
       <div class="stat-label">資料筆數</div>
@@ -401,18 +448,14 @@ function renderStats(rows, valueKey) {
   `;
 }
 
-// =========================
-// 全域事件
-// =========================
+// ===== 14. 全域事件 =====
 function bindGlobalEvents() {
   if (chartTypeSelect) {
     chartTypeSelect.addEventListener("change", renderAllFromFilters);
   }
-
   if (downloadBtn) {
     downloadBtn.addEventListener("click", downloadChartImage);
   }
-
   if (sidebarToggleBtn && sidebarEl) {
     sidebarToggleBtn.addEventListener("click", () => {
       sidebarEl.classList.toggle("active");
@@ -420,9 +463,7 @@ function bindGlobalEvents() {
   }
 }
 
-// =========================
-// 下載圖表
-// =========================
+// ===== 15. 下載圖表 =====
 function downloadChartImage() {
   if (!currentChart) return;
   const link = document.createElement("a");
@@ -433,9 +474,7 @@ function downloadChartImage() {
   link.click();
 }
 
-// =========================
-// Footer 更新日期
-// =========================
+// ===== 16. 更新時間 =====
 function setLastUpdateToday() {
   if (!lastUpdateEl) return;
   const now = new Date();
