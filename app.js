@@ -1,23 +1,26 @@
 /* =========================================================================
-   國際住宅數據庫 — 路由 + 四主題互連
-   - #/definitions   社宅定義
-   - #/eligibility   申請資格
-   - #/reassessment  再審查頻率
-   - #/priority      優先分配條件（本次新增）
+   國際住宅數據庫 — 路由 + 五主題互連
+   - #/definitions    社宅定義
+   - #/eligibility    申請資格
+   - #/reassessment   再審查頻率
+   - #/priority       優先分配
+   - #/characteristics社宅特徵（本次新增）
    ======================================================================= */
 
 /** 資料路徑（若你調整 GitHub 路徑，改這裡即可） */
-const CSV_DEFINITIONS  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
-const CSV_ELIGIBILITY  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
-const CSV_REASSESSMENT = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
-const CSV_PRIORITY     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
+const CSV_DEFINITIONS   = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+const CSV_ELIGIBILITY   = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
+const CSV_REASSESSMENT  = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
+const CSV_PRIORITY      = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
+const CSV_CHARACTERISTICS = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_characteristics_clean_utf8.csv";
 
 /** 首頁主題卡 */
 const TOPICS = [
-  { slug: "definitions",  emoji: "🏘️", title: "各國社宅定義",   desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
-  { slug: "eligibility",  emoji: "🧾", title: "社宅申請資格",   desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
-  { slug: "reassessment", emoji: "🔄", title: "再審查頻率",     desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
-  { slug: "priority",     emoji: "🎯", title: "優先分配條件",   desc: "等待名單、身心障礙、長者等優先規則一覽",       available: true,  cta: "查看條件" }
+  { slug: "definitions",   emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
+  { slug: "eligibility",   emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
+  { slug: "reassessment",  emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
+  { slug: "priority",      emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者等優先規則一覽",       available: true,  cta: "查看條件" },
+  { slug: "characteristics",emoji:"🏷️", title: "社宅特徵",         desc: "定價方式、租金調整、相對市價％、承租戶購屋權",  available: true,  cta: "查看特徵" },
 ];
 
 /* ============ 小工具 ============ */
@@ -35,7 +38,7 @@ function csvParse(text){
   return rows;
 }
 function getQueryParams(hash){
-  const qIndex = hash.indexOf("?"); const out = {};
+  const qIndex = hash.indexOf("?"); const out={};
   if(qIndex === -1) return out;
   const q = hash.slice(qIndex+1);
   q.split("&").forEach(kv=>{
@@ -60,6 +63,7 @@ function renderRoute(){
   else if(hash.startsWith("/eligibility")) renderEligibility(main);
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else if(hash.startsWith("/priority")) renderPriority(main, getQueryParams(hash));
+  else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
   else renderHome(main);
 }
 
@@ -88,7 +92,7 @@ function renderHome(root){
 }
 
 /* =========================================================================
-   社宅定義（與前版相同）
+   社宅定義（簡化保留）
    ======================================================================= */
 const TAG_RULES = [
   { key:"HasPublicProvider",    label:"公部門提供",     regex:/(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
@@ -98,7 +102,7 @@ const TAG_RULES = [
   { key:"HasSubsidyOrLoans",    label:"補貼/貸款/稅優惠",  regex:/(subsid(y|ies)|grant(s)?|loan(s)?|tax|preferential rate)/i },
   { key:"LegalDefined",         label:"法律定義",         regex:/(law|act|defined in law|regulation|legal)/i },
 ];
-const DefState = { data:[], filtered:[], selectedTags:new Set(), selectedCountry:"ALL", searchText:"", compareSet:new Set() };
+const DefState = { data:[], filtered:[], selectedTags:new Set(), selectedCountry:"ALL", searchText:"" };
 
 async function renderDefinitions(root){
   const section = document.createElement("section"); section.id="definitionsExplorer";
@@ -111,25 +115,17 @@ async function renderDefinitions(root){
         <a class="btn" href="#/eligibility">→ 申請資格</a>
         <a class="btn" href="#/reassessment">→ 再審查頻率</a>
         <a class="btn" href="#/priority">→ 優先分配</a>
+        <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       </div>
     </div>
     <div id="def_cards" class="cards fade-in"></div>
     <div id="def_empty" class="empty" style="display:none;">找不到符合條件的結果</div>
-    <aside id="def_compare" class="compare-drawer">
-      <div class="compare-title">比較（最多 3 國）</div>
-      <div id="def_compare_list"></div>
-      <div class="compare-actions">
-        <button class="btn" id="def_clear">清空</button>
-        <button class="btn primary" id="def_copy">複製摘要</button>
-      </div>
-    </aside>
   `;
   root.appendChild(section);
 
   await loadDefinitions();
   buildDefControls();
   renderDefCards();
-  renderDefCompare();
 }
 
 async function loadDefinitions(){
@@ -159,31 +155,17 @@ async function loadDefinitions(){
   })).sort((a,b)=>a.Country.localeCompare(b.Country));
   DefState.filtered = DefState.data.slice();
 }
-
 function buildDefControls(){
   const countries = Array.from(new Set(DefState.data.map(d=>d.Country))).sort((a,b)=>a.localeCompare(b));
   $("#def_country").innerHTML = `<option value="ALL">全部國家</option>` + countries.map(c=>`<option>${escapeHTML(c)}</option>`).join("");
   $("#def_country").addEventListener("change",e=>{DefState.selectedCountry=e.target.value;applyDefFilters();});
   $("#def_search").addEventListener("input",e=>{DefState.searchText=e.target.value.trim();applyDefFilters();});
-
   $("#def_tags").innerHTML = TAG_RULES.map(t=>`<button class="tag" data-key="${t.key}">${t.label}</button>`).join("");
   $("#def_tags").addEventListener("click",e=>{
     const btn=e.target.closest(".tag"); if(!btn) return;
-    const k=btn.dataset.key; if(DefState.selectedTags.has(k)) DefState.selectedTags.delete(k); else DefState.selectedTags.add(k);
-    btn.classList.toggle("active"); applyDefFilters();
-  });
-
-  $("#def_clear").addEventListener("click",()=>{DefState.compareSet.clear();renderDefCompare();$$("#def_cards input.cmp").forEach(cb=>cb.checked=false);});
-  $("#def_copy").addEventListener("click",async()=>{
-    const arr=Array.from(DefState.compareSet);
-    if(!arr.length) return;
-    const txt = arr.map(c=>{
-      const d=DefState.data.find(x=>x.Country===c);
-      const bullets = deriveDefBullets(d).join("；");
-      const terms = d.termsJoined || (d.items[0]?.TermsUsed||"—");
-      return `國家：${d.Country}${d.items.length>1?`（${d.items.length} 個定義）`:""}\n稱呼：${terms}\n重點：${bullets}`;
-    }).join("\n\n");
-    try{ await navigator.clipboard.writeText(txt); alert("已複製比較摘要！"); }catch{ alert("複製失敗，請手動選取文字。"); }
+    const k=btn.dataset.key; btn.classList.toggle("active");
+    if(btn.classList.contains("active")) DefState.selectedTags.add(k); else DefState.selectedTags.delete(k);
+    applyDefFilters();
   });
 }
 function applyDefFilters(){
@@ -230,10 +212,10 @@ function renderDefCards(){
           <a class="btn" href="#/eligibility">→ 申請資格</a>
           <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.Country)}">→ 再審查頻率</a>
           <a class="btn" href="#/priority?country=${encodeURIComponent(d.Country)}">→ 優先分配</a>
+          <a class="btn" href="#/characteristics?country=${encodeURIComponent(d.Country)}">→ 社宅特徵</a>
         </div>
       </article>`;
   }).join("");
-
   // 展開全文
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
@@ -246,21 +228,9 @@ function renderDefCards(){
     }
   };
 }
-function renderDefCompare(){} // (保留結構，簡化本段展示)
-function deriveDefBullets(d){
-  const f=d.flagsCombined||{}; const out=[];
-  if(f.HasPublicProvider) out.push("公部門/地方政府提供或管理");
-  if(f.HasNonProfitProvider) out.push("非營利/合作社參與");
-  if(f.HasBelowMarketRent) out.push("租金低於市價/受管制");
-  if(f.HasIncomeTargeting) out.push("收入審查/目標族群");
-  if(f.HasSubsidyOrLoans) out.push("補貼/貸款/稅優惠");
-  if(f.LegalDefined) out.push("法律/法規定義");
-  if(!out.length) out.push(shortText(d.items[0]?.Definition||"",120));
-  return out.slice(0,5);
-}
 
 /* =========================================================================
-   申請資格（與前版一致，僅在卡片加上 → 優先分配 的連結）
+   申請資格（略同前版）
    ======================================================================= */
 const EliState = { raw:[], view:"matrix", search:"" };
 
@@ -290,6 +260,7 @@ async function renderEligibility(root){
         <a class="btn" href="#/definitions">← 社宅定義</a>
         <a class="btn" href="#/reassessment">→ 再審查頻率</a>
         <a class="btn" href="#/priority">→ 優先分配</a>
+        <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       </div>
     </div>
     <div id="eli_mount" class="fade-in"></div>
@@ -301,7 +272,6 @@ async function renderEligibility(root){
   bindEligibilityControls();
   renderEligibilityView();
 }
-
 async function loadEligibility(){
   const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"});
   const text = await resp.text();
@@ -332,8 +302,15 @@ function bindEligibilityControls(){
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
-    if(q){ const hay=[d.c,d.cn,d.All,d.Inc,d.PR,d.Res,d.Emp,d.Note].join(" ").toLowerCase(); if(!hay.includes(q)) return false; }
-    if(quick){ const mapKey={AllEligible:"All",IncomeThreshold:"Inc",CitizenshipOrPR:"PR",LocalResidency:"Res",Employment:"Emp"}; const val=d[mapKey[quick.key]||quick.key]; if(!val||val.toUpperCase()!==quick.val.toUpperCase()) return false; }
+    if(q){
+      const hay=[d.c,d.cn,d.All,d.Inc,d.PR,d.Res,d.Emp,d.Note].join(" ").toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    if(quick){
+      const mapKey={AllEligible:"All",IncomeThreshold:"Inc",CitizenshipOrPR:"PR",LocalResidency:"Res",Employment:"Emp"};
+      const val=d[mapKey[quick.key]||quick.key];
+      if(!val||val.toUpperCase()!==quick.val.toUpperCase()) return false;
+    }
     return true;
   });
 }
@@ -370,6 +347,7 @@ function renderEligibilityView(){
       <a class="btn" href="#/definitions">← 社宅定義</a>
       <a class="btn" href="#/reassessment">→ 再審查頻率</a>
       <a class="btn" href="#/priority">→ 優先分配</a>
+      <a class="btn" href="#/characteristics">→ 社宅特徵</a>
     </div>`;
   else mount.innerHTML = `
     <div class="cards">
@@ -388,13 +366,14 @@ function renderEligibilityView(){
             <a class="btn" href="#/definitions">查看定義</a>
             <a class="btn" href="#/reassessment?country=${encodeURIComponent(d.cn)}">再審查頻率</a>
             <a class="btn" href="#/priority?country=${encodeURIComponent(d.cn)}">優先分配</a>
+            <a class="btn" href="#/characteristics?country=${encodeURIComponent(d.cn)}">社宅特徵</a>
           </div>
         </article>`).join("")}
     </div>`;
 }
 
 /* =========================================================================
-   再審查頻率（與前版一致，僅加入連到優先分配）
+   再審查頻率（略同前版）
    ======================================================================= */
 const ReaState = { raw:[], search:"", sort:"az", preselectCountry:null };
 
@@ -414,6 +393,7 @@ async function renderReassessment(root, params={}){
       <div class="modebox">
         <a class="btn" href="#/eligibility">← 申請資格</a>
         <a class="btn" href="#/priority">→ 優先分配</a>
+        <a class="btn" href="#/characteristics">→ 社宅特徵</a>
         <a class="btn" href="#/definitions">→ 社宅定義</a>
       </div>
     </div>
@@ -465,12 +445,13 @@ function renderReassessmentTable(){
     <div class="actions" style="margin:10px 0">
       <a class="btn" href="#/eligibility">← 申請資格</a>
       <a class="btn" href="#/priority">→ 優先分配</a>
+      <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       <a class="btn" href="#/definitions">→ 社宅定義</a>
     </div>`;
 }
 
 /* =========================================================================
-   優先分配條件（新增頁） — 矩陣（Yes/No/NA）+ 搜尋 + 快速條件
+   優先分配條件（略同前版）
    ======================================================================= */
 const PriState = { raw:[], search:"", quick:null, sort:"az", preselectCountry:null };
 
@@ -500,6 +481,7 @@ async function renderPriority(root, params={}){
         <a class="btn" href="#/eligibility">← 申請資格</a>
         <a class="btn" href="#/reassessment">→ 再審查頻率</a>
         <a class="btn" href="#/definitions">→ 社宅定義</a>
+        <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       </div>
     </div>
 
@@ -512,7 +494,6 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
-
 async function loadPriority(){
   const resp = await fetch(CSV_PRIORITY,{cache:"no-store"});
   const text = await resp.text();
@@ -533,7 +514,6 @@ async function loadPriority(){
 
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
-
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -542,7 +522,6 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
-
 function pill(v){ const x=String(v||"NA").trim().toUpperCase(); if(x==="YES")return`<span class="pill y">YES</span>`; if(x==="NO")return`<span class="pill n">NO</span>`; return`<span class="pill na">NA</span>`; }
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
@@ -609,6 +588,139 @@ function renderPriorityTable(){
       <a class="btn" href="#/eligibility">← 申請資格</a>
       <a class="btn" href="#/reassessment">→ 再審查頻率</a>
       <a class="btn" href="#/definitions">→ 社宅定義</a>
+      <a class="btn" href="#/characteristics">→ 社宅特徵</a>
+    </div>
+  `;
+}
+
+/* =========================================================================
+   社宅特徵（新增頁） — 8 個旗標 + 百分比 + 承租戶購屋權
+   ======================================================================= */
+const ChaState = { raw:[], search:"", sort:"az", preselectCountry:null };
+
+async function renderCharacteristics(root, params={}){
+  ChaState.preselectCountry = params.country || null;
+
+  const sec=document.createElement("section"); sec.id="characteristics";
+  sec.innerHTML = `
+    <div class="home-hero" style="margin-top:20px;">
+      <h2>社宅特徵（Characteristics of social rental housing）</h2>
+      <p class="note">定價方式（市場/成本/所得/效用）、租金調整（定期/不定期）、社宅租金占市場租金％、承租戶購屋權（含註記）。</p>
+    </div>
+
+    <div class="controls fade-in">
+      <div class="searchbox"><input id="cha_search" type="text" placeholder="搜尋國家、關鍵字…" /></div>
+      <div class="selectbox">
+        <select id="cha_sort">
+          <option value="az">排序：國名 A→Z</option>
+          <option value="score">排序：特徵旗標數（多→少）</option>
+        </select>
+      </div>
+      <div class="modebox">
+        <a class="btn" href="#/definitions">← 社宅定義</a>
+        <a class="btn" href="#/eligibility">→ 申請資格</a>
+        <a class="btn" href="#/priority">→ 優先分配</a>
+        <a class="btn" href="#/reassessment">→ 再審查頻率</a>
+      </div>
+    </div>
+
+    <div id="cha_mount" class="fade-in"></div>
+    <div id="cha_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
+  `;
+  root.appendChild(sec);
+
+  await loadCharacteristics();
+  bindCharacteristicsControls();
+  renderCharacteristicsTable();
+}
+
+async function loadCharacteristics(){
+  const resp = await fetch(CSV_CHARACTERISTICS,{cache:"no-store"});
+  const text = await resp.text();
+  const rows = csvParse(text);
+  const h = rows[0].map(x=>x.trim()); const idx=(n)=>h.findIndex(k=>k.toLowerCase()===n.toLowerCase());
+  const m = {
+    Country: idx("Country"), CountryNormalized: idx("Country_Normalized"),
+    MB: idx("RentSetting_MarketBased"), CB: idx("RentSetting_CostBased"),
+    IB: idx("RentSetting_IncomeBased"), UB: idx("RentSetting_UtilityBased"),
+    IncReg: idx("RentIncrease_Regular"), IncNot: idx("RentIncrease_NotRegular"),
+    Pct: idx("SocialRentPctOfMarket"),
+    Buy: idx("SittingTenantRightToBuy_Norm"), BuyNote: idx("SittingTenantRightToBuy_Notes")
+  };
+  ChaState.raw = rows.slice(1).map(r=>({
+    c:(r[m.Country]||"").trim(), cn:(r[m.CountryNormalized]||"").trim()||(r[m.Country]||"").trim(),
+    MB:(r[m.MB]||"NA").trim(), CB:(r[m.CB]||"NA").trim(), IB:(r[m.IB]||"NA").trim(), UB:(r[m.UB]||"NA").trim(),
+    IncReg:(r[m.IncReg]||"NA").trim(), IncNot:(r[m.IncNot]||"NA").trim(),
+    Pct:(r[m.Pct]||"").trim(),
+    Buy:(r[m.Buy]||"NA").trim(), BuyNote:(r[m.BuyNote]||"").trim()
+  })).filter(x=>x.c);
+
+  if(ChaState.preselectCountry){ ChaState.search=ChaState.preselectCountry.toLowerCase(); const input=$("#cha_search"); if(input) input.value=ChaState.preselectCountry; }
+}
+function bindCharacteristicsControls(){
+  $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim().toLowerCase(); renderCharacteristicsTable();});
+  $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
+}
+function pillYN(v){ const x=String(v||"NA").trim().toUpperCase(); if(x==="YES")return`<span class="pill y">YES</span>`; if(x==="NO")return`<span class="pill n">NO</span>`; return`<span class="pill na">NA</span>`; }
+function filterCharacteristics(data){
+  const q=ChaState.search;
+  if(!q) return data;
+  return data.filter(d=>{
+    const hay=[d.c,d.cn,d.MB,d.CB,d.IB,d.UB,d.IncReg,d.IncNot,d.Pct,d.Buy,d.BuyNote].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+}
+function sortCharacteristics(arr){
+  if(ChaState.sort==="score"){
+    const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
+    arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
+  }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
+}
+function renderCharacteristicsTable(){
+  const mount=$("#cha_mount"), empty=$("#cha_empty");
+  let data = filterCharacteristics(ChaState.raw.slice()); sortCharacteristics(data);
+  if(!data.length){ mount.innerHTML=""; empty.style.display="block"; return; } empty.style.display="none";
+
+  mount.innerHTML = `
+    <div class="matrix">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Country</th>
+            <th>Market-based</th>
+            <th>Cost-based</th>
+            <th>Income-based</th>
+            <th>Utility-based</th>
+            <th>Rent ↑ regular</th>
+            <th>Rent ↑ not regular</th>
+            <th>Social rent % of market</th>
+            <th>Sitting tenant right to buy</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(d=>`
+            <tr>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
+              <td>${pillYN(d.MB)}</td>
+              <td>${pillYN(d.CB)}</td>
+              <td>${pillYN(d.IB)}</td>
+              <td>${pillYN(d.UB)}</td>
+              <td>${pillYN(d.IncReg)}</td>
+              <td>${pillYN(d.IncNot)}</td>
+              <td>${escapeHTML(d.Pct||"")}</td>
+              <td>${escapeHTML(d.Buy||"")}</td>
+              <td class="note">${escapeHTML(d.BuyNote||"")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="actions" style="margin:10px 0">
+      <a class="btn" href="#/definitions">← 社宅定義</a>
+      <a class="btn" href="#/eligibility">→ 申請資格</a>
+      <a class="btn" href="#/priority">→ 優先分配</a>
+      <a class="btn" href="#/reassessment">→ 再審查頻率</a>
     </div>
   `;
 }
