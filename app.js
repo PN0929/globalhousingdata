@@ -1,7 +1,5 @@
-// app.js — Policy 主題極簡模式 + 其他主題一般模式
-// - Policy：橫向條形（最新年）+ Top/Bottom/All + 點擊詳情卡（含 sparkline）+ 一鍵展開表
-// - 其他主題：維持之前的一般模式（可切圖、國家/年份篩選）
-// - 多分頁 Excel + 表頭列掃描 + 資料朝向（寬表→長表）+ 手動欄位對應
+// app.js — MVP 精簡版：數值檔優先、PH 主題極簡視覺
+// 相容你的 index.html：左側 .filter-buttons (all / HC / HM / PH)、datasetList、mainChart 等
 
 /***** GitHub 設定 *****/
 const GITHUB_OWNER = "PN0929";
@@ -9,505 +7,479 @@ const GITHUB_REPO  = "globalhousingdata";
 const GITHUB_REF   = "54eb88edd1cab3fcb88c82e0288e93ba87694270";
 const GITHUB_DIR   = "OECD DATA";
 
-/***** 排除的國家代碼 / 名稱 *****/
+/***** 常數與別名 *****/
 const EXCLUDE_CODES = ["TWN", "Taiwan", "TAIWAN"];
-
-/***** 欄位別名（用來猜長表欄位）*****/
 const COLUMN_ALIASES = {
   country: ["location","loc","country","country name","country_name","countryname","cou","geo","ref_area","area","economy","countrycode","country code","country_code"],
   year:    ["time","year","time period","time_period","timeperiod","reference period","ref_period","period","date","ref year","ref_year"],
   value:   ["value","obs_value","obs value","val","indicator value","data","amount","measure","obs","estimate","est"]
 };
 
-/***** 主題（含 policy 極簡提示）*****/
-const TOPICS = [
-  { id: "afford",    name: "住宅負擔",  match: ["HM","HC"], insight: "看『住得起』：建議先看最新年份的各國比較，再回看趨勢。" },
-  { id: "market",    name: "住宅市場",  match: ["HM"],      insight: "觀察價格與租金指數的變化，切年份看波動。" },
-  { id: "condition", name: "住宅條件",  match: ["HC"],      insight: "擁擠度、設備等橫向比較合適。" },
-  { id: "policy",    name: "住宅政策",  match: ["PH"],      insight: "已為你自動顯示最新年度的各國比較。點條形看該國 10 年趨勢與數字。若資料格式特別混亂，可在失敗提示時用『手動欄位對應』。" }
-];
+/***** PH 主題：僅可數值化的 allowlist（MVP 先做這些）*****/
+const PH_NUMERIC_ALLOWLIST = new Set([
+  "PH2-1-Public-spending-support-to-homebuyers.xlsx",
+  "PH3-1-Public-spending-on-housing-allowances.xlsx",
+  "PH3-3-Recipients-payment-rates-housing-allowances.xlsx",
+  "PH4-1-Public-spending-social-rental-housing.xlsx",
+  "PH4-2-Social-rental-housing-stock.xlsx"
+]);
+// 其餘 PH3-2 / PH4-3 / PH5-1 / PH6-1 / PH7-1 等先不視覺化（多為制度/文字、混合欄）
 
 /***** 狀態 *****/
-let currentTopicId = "afford";
-let currentChart = null;
-let currentWorkbook = null;
-let currentDatasetFile = null;
-
+let currentFilter = "all"; // all | HC | HM | PH
 let allFiles = [];
+let currentFile = null;
+let workbook = null;
 
-// 一般模式使用
-let currentRawRows = [];
-let currentKeys = null; // {countryKey, yearKey, valueKey}
+let currentChart = null;
 
-// Policy 模式使用（長表）
-let normalizedRows = []; // {country, year|null, value:number}
-let policyViewMode = "top"; // "top" | "bottom" | "all"
+// 一般模式（HC/HM 等）
+let rawRows = [];
+let rawKeys = null; // {countryKey, yearKey, valueKey}
 
-// 手動欄位對應（長表）
-let manualMapping = { enabled:false, country:null, year:null, value:null };
+// PH 極簡模式（長表）
+let normRows = []; // {country, year|null, value:number}
+let phViewMode = "top"; // top | bottom | all
 
 /***** DOM *****/
 const datasetListEl        = document.getElementById("datasetList");
-const topicListEl          = document.getElementById("topicList");
-const welcomeScreenEl      = document.getElementById("welcomeScreen");
-const visualizationAreaEl  = document.getElementById("visualizationArea");
-const currentDatasetTitleEl= document.getElementById("currentDatasetTitle");
+const mainChartEl          = document.getElementById("mainChart");
 const dataFiltersEl        = document.getElementById("dataFilters");
 const dataTableEl          = document.getElementById("dataTable");
 const statisticsPanelEl    = document.getElementById("statisticsPanel");
 const chartTypeSelect      = document.getElementById("chartType");
 const downloadBtn          = document.getElementById("downloadBtn");
+const currentDatasetTitleEl= document.getElementById("currentDatasetTitle");
+const welcomeScreenEl      = document.getElementById("welcomeScreen");
+const visualizationAreaEl  = document.getElementById("visualizationArea");
 const lastUpdateEl         = document.getElementById("lastUpdate");
-const insightBoxEl         = document.getElementById("insightBox");
-const sidebarToggleBtn     = document.getElementById("sidebarToggle");
-const sidebarEl            = document.querySelector(".sidebar");
 
 /* 初始化 */
 document.addEventListener("DOMContentLoaded", () => {
-  renderTopicButtons();
-  loadGitHubDatasets();
+  bindSidebarFilterButtons();
+  loadGitHubList();
+  bindGlobals();
   setLastUpdateToday();
-  bindGlobalEvents();
 });
 
-/* 工具：當前是否為 policy 主題 */
-const isPolicyMode = () => currentTopicId === "policy";
-
-/* ===== 主題按鈕 ===== */
-function renderTopicButtons() {
-  topicListEl.innerHTML = "";
-  TOPICS.forEach((t, i) => {
-    const btn = document.createElement("button");
-    btn.className = "filter-btn" + (i===0 ? " active" : "");
-    btn.textContent = t.name;
+/* 綁定左側主題按鈕（你原本 HTML 的 .filter-buttons）*/
+function bindSidebarFilterButtons() {
+  document.querySelectorAll(".filter-btn").forEach(btn => {
+    if (!btn.dataset.filter) return;
     btn.addEventListener("click", () => {
-      topicListEl.querySelectorAll(".filter-btn").forEach(b=>b.classList.remove("active"));
+      document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      currentTopicId = t.id;
-      filterAndRenderDatasets();
-      renderInsightForTopic();
-      // 切換主題時，清空右側殘留
-      clearMainOutputs();
-      // policy 模式隱藏圖表類型下拉；一般模式顯示
-      if (chartTypeSelect) chartTypeSelect.parentElement.style.display = isPolicyMode() ? "none" : "";
+      currentFilter = btn.dataset.filter; // all / HC / HM / PH
+      renderDatasetList();
+      clearMain();
     });
-    topicListEl.appendChild(btn);
   });
 }
 
-function renderInsightForTopic() {
-  const t = TOPICS.find(x=>x.id===currentTopicId);
-  if (!insightBoxEl) return;
-  insightBoxEl.innerHTML = `
-    <h4>如何看這個主題？</h4>
-    <p>${t ? t.insight : "從左側選擇一個資料集，系統會幫你畫出常見的圖表。"}</p>
-  `;
-}
-
-/* ===== 清空右側主區塊輸出 ===== */
-function clearMainOutputs() {
-  if (currentChart) { currentChart.destroy(); currentChart = null; }
-  dataTableEl.innerHTML = "";
-  statisticsPanelEl.innerHTML = "";
-}
-
-/* ===== 讀 GitHub 檔案清單 ===== */
-async function loadGitHubDatasets() {
-  const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(GITHUB_DIR)}?ref=${GITHUB_REF}`;
+/* 載入 GitHub 資料夾檔案清單 */
+async function loadGitHubList() {
   datasetListEl.innerHTML = `<div class="loading">載入數據集中…</div>`;
   try {
+    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${encodeURIComponent(GITHUB_DIR)}?ref=${GITHUB_REF}`;
     const res = await fetch(apiUrl);
     if (!res.ok) throw new Error("無法取得 GitHub 資料夾內容");
     const files = await res.json();
-    allFiles = files.filter(f => f.type==="file" && (f.name.toLowerCase().endsWith(".xlsx") || f.name.toLowerCase().endsWith(".xls")));
-    filterAndRenderDatasets();
+    allFiles = files.filter(f => f.type === "file" && f.name.match(/\.xlsx?$/i));
+    renderDatasetList();
   } catch (e) {
-    console.error(e);
     datasetListEl.innerHTML = `<p style="color:#ef4444">載入失敗：${e.message}</p>`;
   }
 }
 
-/* ===== 依主題顯示資料集 ===== */
-function filterAndRenderDatasets() {
-  const topic = TOPICS.find(t=>t.id===currentTopicId);
+/* 依主題顯示資料集（PH 僅顯示 allowlist）*/
+function renderDatasetList() {
   datasetListEl.innerHTML = "";
-  const matched = allFiles.filter(file => {
-    if (!topic) return true;
-    const up = file.name.toUpperCase();
-    return topic.match.some(code=>up.includes(code));
+  const list = allFiles.filter(f => {
+    if (currentFilter === "all") return true;
+    const up = f.name.toUpperCase();
+    if (currentFilter === "PH") {
+      // 只顯示可數值化的
+      return up.includes("PH") && PH_NUMERIC_ALLOWLIST.has(f.name);
+    }
+    return up.includes(currentFilter);
   });
-  if (!matched.length) { datasetListEl.innerHTML = `<p>這個主題暫時沒有對應的指標</p>`; return; }
-
-  matched.forEach(file => {
-    const item = document.createElement("div");
-    item.className = "dataset-item";
-    item.innerHTML = `
+  if (!list.length) {
+    datasetListEl.innerHTML = `<p>這個主題暫無可視覺化指標（MVP 僅先做可數值化者）。</p>`;
+    return;
+  }
+  list.forEach(file => {
+    const div = document.createElement("div");
+    div.className = "dataset-item";
+    div.innerHTML = `
       <div class="dataset-code">${file.name.replace(/\.xlsx?$/i,"")}</div>
       <div class="dataset-name">${file.path}</div>
     `;
-    item.addEventListener("click", () => {
-      datasetListEl.querySelectorAll(".dataset-item").forEach(el=>el.classList.remove("active"));
-      item.classList.add("active");
-      currentDatasetFile = file;
-      loadOneExcel(file);
+    div.addEventListener("click", () => {
+      datasetListEl.querySelectorAll(".dataset-item").forEach(x => x.classList.remove("active"));
+      div.classList.add("active");
+      openDataset(file);
     });
-    datasetListEl.appendChild(item);
+    datasetListEl.appendChild(div);
   });
-  renderInsightForTopic();
 }
 
-/* ===== 載入單一 Excel ===== */
-async function loadOneExcel(file) {
-  manualMapping = { enabled:false, country:null, year:null, value:null };
-  const rawUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${file.path}`;
+/* 打開單一檔案（Excel）*/
+async function openDataset(file) {
   try {
+    const rawUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_REF}/${file.path}`;
     const res = await fetch(rawUrl);
-    if (!res.ok) throw new Error("無法下載檔案：" + file.name);
+    if (!res.ok) throw new Error("下載失敗：" + file.name);
     const buf = await res.arrayBuffer();
-    currentWorkbook = XLSX.read(buf, { type: "array" });
+    workbook = XLSX.read(buf, { type: "array" });
+    currentFile = file;
 
-    const pick = autoPickBestSheet(currentWorkbook);
-    showVisualizationArea();
-    renderDatasetTitle(file.name.replace(/\.xlsx?$/i,""));
-
-    if (!pick) {
-      renderSheetOrientationControls(currentWorkbook); // 手動
-      showFormatError("找不到合適的資料區。請手動選擇『工作表 / 表頭列 / 資料朝向』，或用『手動欄位對應』。");
+    // 自動挑最佳分頁 + 表頭 + 朝向
+    const picked = autoPickBestSheet(workbook);
+    if (!picked) {
+      showError("這個檔案的表格格式不規則，暫時無法自動視覺化（MVP 僅支援可數值化的交叉/長表）。");
       return;
     }
-    applySheetTransform(pick.sheetName, pick.headerRow, pick.orientation);
-  } catch(e) {
-    console.error(e);
-    alert("讀取檔案失敗：" + e.message);
+
+    // 正規化成長表
+    const longRows = sheetToLong(workbook.Sheets[picked.sheetName], picked.headerIdx, picked.orientation);
+    const cleaned = cleanAndFilterRows(longRows);
+
+    if (!cleaned.length) {
+      showError("這個檔案沒有可用的數值資料（或欄位為純文字/制度描述）。");
+      return;
+    }
+
+    showVizArea();
+    currentDatasetTitleEl.textContent = `${file.name.replace(/\.xlsx?$/i,"")}（${picked.sheetName}）`;
+
+    if (currentFilter === "PH") {
+      // PH 極簡：最新年 Top/Bottom/All 橫向條形 + 點擊詳情
+      normRows = cleaned;
+      renderPHControls();
+      renderPHChart();
+      renderPHTableCollapsed();
+    } else {
+      // 一般模式
+      rawRows = rowsFromNormToRaw(cleaned);
+      rawKeys = { countryKey:"Country", yearKey:"Year", valueKey:"Value" };
+      renderGeneralFilters(rawRows, rawKeys);
+      renderGeneralAll();
+    }
+  } catch (e) {
+    showError(e.message || "開啟資料失敗");
   }
 }
 
-/* ===== 自動挑選最佳分頁 / 表頭列 / 朝向 ===== */
-function autoPickBestSheet(workbook) {
-  let best = null; // {sheetName, headerRow, orientation, score}
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
+/* ===== 視覺區塊通用 ===== */
+function clearMain() {
+  if (currentChart) { currentChart.destroy(); currentChart = null; }
+  dataFiltersEl.innerHTML = "";
+  dataTableEl.innerHTML = "";
+  statisticsPanelEl.innerHTML = "";
+}
+function showVizArea() {
+  if (welcomeScreenEl) welcomeScreenEl.style.display = "none";
+  if (visualizationAreaEl) visualizationAreaEl.style.display = "";
+}
+function showError(msg) {
+  showVizArea();
+  clearMain();
+  dataFiltersEl.innerHTML = "";
+  dataTableEl.innerHTML = "";
+  statisticsPanelEl.innerHTML = `<div class="stat-card" style="grid-column:1/-1;color:#ef4444">${msg}</div>`;
+}
+
+/* ====== 自動偵測：最佳分頁 / 表頭列 / 朝向 ====== */
+function autoPickBestSheet(wb) {
+  let best = null;
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
     if (!matrix || !matrix.length) continue;
-
     const maxScan = Math.min(200, matrix.length);
-    for (let hdrIdx = 0; hdrIdx < maxScan; hdrIdx++) {
-      const headerRow = matrix[hdrIdx] || [];
-      const orientation = detectOrientationByHeader(matrix, hdrIdx);
-      if (!orientation) continue;
-      const rowsCount = matrix.length - hdrIdx;
-      let score = (orientation==="long" ? 3 : 2);
-      score += estimateHeaderHit(headerRow);
-      score += Math.log(rowsCount + 1);
-      if (!best || score > best.score) best = { sheetName, headerRow: hdrIdx, orientation, score };
+    for (let i = 0; i < maxScan; i++) {
+      const orient = detectOrientation(matrix, i);
+      if (!orient) continue;
+      const score = estimateHeaderHit(matrix[i]) + Math.log(matrix.length - i + 1) + (orient === "long" ? 3 : 2);
+      if (!best || score > best.score) best = { sheetName, headerIdx:i, orientation:orient, score };
     }
   }
   return best;
 }
-
-function estimateHeaderHit(headerRow) {
-  const labels = headerRow.map(v => (v==null ? "" : String(v))).map(s=>s.trim().toLowerCase());
-  const hasCountry = labels.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
-  const yearLikeCt = labels.filter(isYearLike).length;
-  return (hasCountry?1:0) + (yearLikeCt ? 1 : 0);
-}
-function detectOrientationByHeader(matrix, headerIdx) {
+function detectOrientation(matrix, headerIdx) {
   const header = (matrix[headerIdx] || []).map(v => v==null ? "" : String(v).trim());
-  const firstColBelow = (matrix.slice(headerIdx+1).map(r=>r?.[0])).map(v => v==null ? "" : String(v).trim());
-  const yearLikeCols = header.slice(1).filter(isYearLike).length;
-  const yearLikeRows = firstColBelow.filter(isYearLike).length;
+  const firstCol = matrix.slice(headerIdx+1).map(r => (r && r[0]!=null) ? String(r[0]).trim() : "");
+  const yearCols = header.slice(1).filter(isYearLike).length;
+  const yearRows = firstCol.filter(isYearLike).length;
 
-  const headerLower = header.map(s=>s.toLowerCase());
-  const hasCountry = headerLower.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
-  const hasYear    = headerLower.some(lbl => COLUMN_ALIASES.year.some(a=>lbl.includes(a)));
-  const hasValue   = headerLower.some(lbl => COLUMN_ALIASES.value.some(a=>lbl.includes(a)));
-  if (hasCountry && (hasYear || yearLikeCols || yearLikeRows) && hasValue) return "long";
+  const hl = header.map(s=>s.toLowerCase());
+  const hasC = hl.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
+  const hasY = hl.some(lbl => COLUMN_ALIASES.year.some(a=>lbl.includes(a)));
+  const hasV = hl.some(lbl => COLUMN_ALIASES.value.some(a=>lbl.includes(a)));
+  if (hasC && (hasY || yearCols || yearRows) && hasV) return "long";
 
-  if (yearLikeCols >= 3) return "wide-year-in-columns";
-  if (yearLikeRows >= 3) return "wide-year-in-rows";
+  if (yearCols >= 3) return "wide-year-in-columns";
+  if (yearRows >= 3) return "wide-year-in-rows";
   return null;
+}
+function estimateHeaderHit(row) {
+  const labels = (row || []).map(v => v==null ? "" : String(v).trim().toLowerCase());
+  const hasC = labels.some(lbl => COLUMN_ALIASES.country.some(a=>lbl.includes(a)));
+  const anyYear = labels.some(isYearLike);
+  return (hasC?1:0) + (anyYear?1:0);
 }
 function isYearLike(x) {
   const s = String(x||"").trim();
   const m = s.match(/(18|19|20)\d{2}/);
   if (!m) return false;
-  const y = parseInt(m[0],10);
+  const y = Number(m[0]);
   return y>=1850 && y<=2100;
 }
 
-/* ===== 套用分頁/表頭/朝向 → 正規化長表 → 渲染 ===== */
-function applySheetTransform(sheetName, headerRowIndex, orientation) {
-  renderSheetOrientationControls(currentWorkbook, sheetName, headerRowIndex, orientation);
-
-  const sheet = currentWorkbook.Sheets[sheetName];
+/* ====== 交叉表/長表 → 長表 {country,year,value} ====== */
+function sheetToLong(sheet, headerIdx, orientation) {
   const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-  const header = (matrix[headerRowIndex] || []).map(v => v==null ? "" : String(v).trim());
-  const body   = matrix.slice(headerRowIndex+1);
-
-  let longRows;
+  const header = (matrix[headerIdx] || []).map(v => v==null ? "" : String(v).trim());
+  const body   = matrix.slice(headerIdx+1);
   if (orientation === "long") {
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: null, range: headerRowIndex });
-    longRows = normalizeLongTable(rows);
-    if (!longRows.length) {
-      renderManualMappingPanel(rows);
-      showFormatError("需要手動欄位對應：請選擇『國家/地區、年份（可選無年份）、值』欄位。");
-      return;
-    }
+    const df = XLSX.utils.sheet_to_json(sheet, { defval: null, range: headerIdx });
+    return normalizeLong(df);
   } else if (orientation === "wide-year-in-columns") {
-    longRows = meltWideYearInColumns(header, body);
+    // 第一欄=國家，第二欄起=年份
+    const out = [];
+    body.forEach(r => {
+      if (!r || r.length===0) return;
+      const country = safeCell(r[0]);
+      if (!country) return;
+      for (let j=1; j<header.length; j++) {
+        const yl = header[j];
+        if (!isYearLike(yl)) continue;
+        const val = r[j];
+        out.push({ country, year: extractYear(yl), value: val });
+      }
+    });
+    return out;
   } else if (orientation === "wide-year-in-rows") {
-    longRows = meltWideYearInRows(header, body);
-  } else {
-    showFormatError("朝向設定不正確。");
-    return;
+    // 第一列=國家，第一欄=年份
+    const countries = header.slice(1);
+    const out = [];
+    body.forEach(r => {
+      if (!r || r.length===0) return;
+      const yl = safeCell(r[0]);
+      if (!isYearLike(yl)) return;
+      const year = extractYear(yl);
+      for (let j=1; j<r.length; j++) {
+        const country = countries[j-1];
+        if (!country) continue;
+        const val = r[j];
+        out.push({ country, year, value: val });
+      }
+    });
+    return out;
   }
-
-  longRows = cleanAndFilterRows(longRows);
-  if (!longRows.length) {
-    const rowsObj = XLSX.utils.sheet_to_json(sheet, { defval: null, range: headerRowIndex });
-    renderManualMappingPanel(rowsObj);
-    showFormatError("自動轉換後沒有可用資料。請改用『手動欄位對應』。");
-    return;
-  }
-
-  normalizedRows = longRows;
-  clearFormatError();
-  removeManualMappingPanel();
-  showVisualizationArea();
-  renderDatasetTitle(`${currentDatasetFile.name.replace(/\.xlsx?$/i,"")}（${sheetName}）`);
-
-  if (isPolicyMode()) {
-    renderPolicyUIAndChart();
-  } else {
-    // 一般模式
-    currentRawRows = rowsFromNormalizedBackToRawKeys(normalizedRows);
-    currentKeys = deriveKeysFromNormalized(currentRawRows);
-    renderFiltersFromNormalized_general(currentRawRows, currentKeys);
-    renderAllFromFilters_general();
-  }
+  return [];
+}
+function normalizeLong(rows) {
+  if (!rows || !rows.length) return [];
+  const cols = Object.keys(rows[0]);
+  const pick = (aliases) => {
+    const low = Object.fromEntries(cols.map(n=>[n.toLowerCase(), n]));
+    for (const a of aliases) if (low[a.toLowerCase()]) return low[a.toLowerCase()];
+    for (const c of cols) {
+      const lc = c.toLowerCase();
+      if (aliases.some(a=>lc.includes(a.toLowerCase()))) return c;
+    }
+    return null;
+  };
+  let cKey = pick(COLUMN_ALIASES.country);
+  let yKey = pick(COLUMN_ALIASES.year);
+  let vKey = pick(COLUMN_ALIASES.value) || cols.find(k=>k!==cKey && k!==yKey) || cols[1];
+  if (!cKey || !vKey) return [];
+  return rows.map(r => ({ country:r[cKey], year: yKey ? r[yKey] : null, value:r[vKey] }));
 }
 
-/* ===== 將長表回推成一般模式需要的 raw 形（方便重用既有一般流程）===== */
-function rowsFromNormalizedBackToRawKeys(rows) {
-  return rows.map(r => ({ Country: r.country, Year: r.year, Value: r.value }));
+/* ====== 清理 / 排除 ====== */
+function safeCell(x){ return x==null ? "" : String(x).trim(); }
+function extractYear(x){ const m = String(x||"").match(/(18|19|20)\d{2}/); return m ? m[0] : null; }
+function toNumberRobust(v) {
+  if (v==null) return null;
+  let s = String(v).trim();
+  s = s.replace(/[a-z\u00AA-\u02AF\u1D2C-\u1D7F\u2070-\u209F]/gi, ""); // 註腳/上標
+  s = s.replace(/[,%\s]/g, ""); // 逗號/空白/百分比
+  if (s==="" || s==="-" ) return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
 }
-function deriveKeysFromNormalized(rows) {
-  return { countryKey: "Country", yearKey: "Year", valueKey: "Value" };
+function cleanAndFilterRows(rows) {
+  const out = (rows||[])
+    .filter(r => r && r.country!=null && r.value!=null && String(r.country).trim()!=="")
+    .map(r => ({ country: r.country, year: r.year ?? null, value: toNumberRobust(r.value) }))
+    .filter(r => r.value!=null)
+    .filter(r => !/^source:|^note:/i.test(String(r.country)))
+    .filter(r => !EXCLUDE_CODES.includes(String(r.country)));
+  return out;
 }
 
-/* ======= Policy 專屬：UI + 圖 + 詳情卡 + 表格 ======= */
-function renderPolicyUIAndChart() {
-  // 1) 清掉既有 filter-group（保留分頁/表頭/朝向控件 & insight）
-  Array.from(dataFiltersEl.querySelectorAll(".filter-group"))
-    .filter(el => !["sheetSelectorGroup","headerRowGroup","orientationGroup"].includes(el.id))
-    .forEach(el => el.remove());
-
-  // 2) 三個微控件：Top/Bottom/All
-  const pills = document.createElement("div");
-  pills.className = "filter-group";
-  pills.id = "policyPills";
-  pills.innerHTML = `
-    <label>顯示集合</label>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-      <button type="button" data-mode="top" class="filter-btn ${policyViewMode==='top'?'active':''}">Top 15</button>
-      <button type="button" data-mode="bottom" class="filter-btn ${policyViewMode==='bottom'?'active':''}">Bottom 15</button>
-      <button type="button" data-mode="all" class="filter-btn ${policyViewMode==='all'?'active':''}">All</button>
-      <button type="button" id="toggleTableBtn" class="filter-btn">展開 / 收合原始表</button>
+/* ====== PH 極簡模式 ====== */
+function renderPHControls() {
+  dataFiltersEl.innerHTML = `
+    <div class="filter-group" id="phControls">
+      <label>顯示集合</label>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button type="button" class="filter-btn ${phViewMode==='top'?'active':''}" data-mode="top">Top 15</button>
+        <button type="button" class="filter-btn ${phViewMode==='bottom'?'active':''}" data-mode="bottom">Bottom 15</button>
+        <button type="button" class="filter-btn ${phViewMode==='all'?'active':''}" data-mode="all">All</button>
+        <button type="button" class="filter-btn" id="toggleTableBtn">展開 / 收合原始表</button>
+      </div>
     </div>
   `;
-  dataFiltersEl.appendChild(pills);
-
-  pills.querySelectorAll("button[data-mode]").forEach(btn=>{
+  dataFiltersEl.querySelectorAll("button[data-mode]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      policyViewMode = btn.dataset.mode;
-      pills.querySelectorAll("button[data-mode]").forEach(b=>b.classList.remove("active"));
+      dataFiltersEl.querySelectorAll("button[data-mode]").forEach(b=>b.classList.remove("active"));
       btn.classList.add("active");
-      renderPolicyChartOnly(); // 只重畫圖
+      phViewMode = btn.dataset.mode;
+      renderPHChart();
     });
   });
-  const toggleBtn = pills.querySelector("#toggleTableBtn");
-  if (toggleBtn) toggleBtn.addEventListener("click", ()=>{
+  dataFiltersEl.querySelector("#toggleTableBtn").addEventListener("click", ()=>{
     const isHidden = dataTableEl.style.display === "none";
     dataTableEl.style.display = isHidden ? "" : "none";
   });
-
-  // 3) 初始化表格為收合
-  dataTableEl.style.display = "none";
-  renderPolicyTable();
-
-  // 4) 畫主圖
-  renderPolicyChartOnly();
 }
-
-/* ===== Policy：主圖（橫向條形，最新年，Top/Bottom/All）===== */
-function renderPolicyChartOnly() {
-  // 摘取最新年（若沒有年份，就 year=null，直接畫一次）
-  const years = Array.from(new Set(normalizedRows.map(r=>r.year).filter(Boolean))).map(y=>Number(y));
+function renderPHChart() {
+  // 最新年
+  const years = Array.from(new Set(normRows.map(r=>r.year).filter(Boolean))).map(Number);
   const latestYear = years.length ? Math.max(...years) : null;
 
   let dataset = [];
-  if (latestYear !== null) {
-    const map = new Map(); // country -> value of latestYear
-    normalizedRows.forEach(r=>{
-      if (String(r.year) === String(latestYear)) {
-        map.set(r.country, r.value);
-      }
+  if (latestYear != null) {
+    const map = new Map();
+    normRows.forEach(r => {
+      if (String(r.year) === String(latestYear)) map.set(r.country, r.value);
     });
-    dataset = Array.from(map.entries()).map(([country, value])=>({country, value}));
+    dataset = Array.from(map.entries()).map(([country,value])=>({country, value}));
   } else {
-    // 無年份：取每國第一筆
-    const firstMap = new Map();
-    normalizedRows.forEach(r=>{
-      if (!firstMap.has(r.country)) firstMap.set(r.country, r.value);
-    });
-    dataset = Array.from(firstMap.entries()).map(([country, value])=>({country, value}));
+    // 無年份：取第一筆
+    const map = new Map();
+    normRows.forEach(r => { if (!map.has(r.country)) map.set(r.country, r.value); });
+    dataset = Array.from(map.entries()).map(([country,value])=>({country, value}));
   }
 
-  // 排序 + 取 Top/Bottom/All
   dataset.sort((a,b)=>b.value - a.value);
   let view = dataset;
-  if (policyViewMode === "top") view = dataset.slice(0, 15);
-  else if (policyViewMode === "bottom") view = dataset.slice(-15);
-
-  // 畫圖
-  const canvas = document.getElementById("mainChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (currentChart) currentChart.destroy();
+  if (phViewMode === "top") view = dataset.slice(0,15);
+  else if (phViewMode === "bottom") view = dataset.slice(-15);
 
   const labels = view.map(d=>d.country);
   const data   = view.map(d=>d.value);
 
+  if (currentChart) currentChart.destroy();
+  const ctx = mainChartEl.getContext("2d");
   currentChart = new Chart(ctx, {
     type: "bar",
-    data: { labels, datasets: [{ label: latestYear ? `最新年：${latestYear}` : "最新資料", data, borderWidth: 2 }] },
+    data: { labels, datasets: [{ label: latestYear? `最新年：${latestYear}`:"最新資料", data, borderWidth:2 }]},
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      indexAxis: "y",
-      scales: { x: { beginAtZero: true } },
-      onClick: (_, elements) => {
-        if (!elements || !elements.length) return;
-        const idx = elements[0].index;
+      responsive:true, maintainAspectRatio:false,
+      indexAxis:"y",
+      scales: { x: { beginAtZero:true } },
+      onClick: (_, el) => {
+        if (!el || !el.length) return;
+        const idx = el[0].index;
         const country = labels[idx];
-        renderPolicyDetailCard(country, latestYear);
+        renderPHDetail(country, latestYear);
       },
       plugins: {
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const v = ctx.parsed.x;
-              return `${ctx.label}: ${isFinite(v)? v : "-"}` + (latestYear? `（${latestYear}）` : "");
-            }
+        tooltip: { callbacks: {
+          label: (ctx) => {
+            const v = ctx.parsed.x;
+            return `${ctx.label}: ${isFinite(v)? v : "-"}` + (latestYear? `（${latestYear}）`:"");
           }
-        }
+        } }
       }
     }
   });
 }
+function renderPHDetail(country, latestYear) {
+  // 該國近年序列（如有年份）
+  const series = normRows.filter(r=>r.country===country && r.year!=null)
+                         .sort((a,b)=>Number(a.year)-Number(b.year));
+  const ys = series.map(r=>Number(r.year));
+  const vs = series.map(r=>r.value);
+  const tYs = ys.length>10 ? ys.slice(-10) : ys;
+  const tVs = vs.length>10 ? vs.slice(-10) : vs;
 
-/* ===== Policy：詳情卡（右側 statisticsPanel 區塊顯示）+ sparkline ===== */
-function renderPolicyDetailCard(country, latestYear) {
-  // 近 10 年資料
-  const series = normalizedRows
-    .filter(r=>r.country===country && (r.year!=null))
-    .sort((a,b)=>Number(a.year)-Number(b.year));
-
-  const years = series.map(r=>Number(r.year));
-  const values= series.map(r=>r.value);
-
-  const trimmedYears = years.length>10 ? years.slice(-10) : years;
-  const trimmedVals  = values.length>10 ? values.slice(-10): values;
-
-  // 當年值 & OECD 平均
-  let currentVal = null;
+  // 當年值 / OECD 平均
+  let cur = null;
   if (latestYear!=null) {
-    const found = normalizedRows.find(r=>r.country===country && String(r.year)===String(latestYear));
-    currentVal = found ? found.value : null;
+    const f = normRows.find(r=>r.country===country && String(r.year)===String(latestYear));
+    cur = f? f.value : null;
   } else {
-    const first = normalizedRows.find(r=>r.country===country);
-    currentVal = first ? first.value : null;
+    const f = normRows.find(r=>r.country===country);
+    cur = f? f.value : null;
   }
-  const sameYearRows = latestYear!=null
-    ? normalizedRows.filter(r=>String(r.year)===String(latestYear))
-    : normalizedRows;
+  const sameYearRows = latestYear!=null ? normRows.filter(r=>String(r.year)===String(latestYear)) : normRows;
   const nums = sameYearRows.map(r=>r.value).filter(n=>typeof n==="number" && !isNaN(n));
-  const oecdAvg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length) : null;
+  const avg = nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : null;
 
-  // 微 insight
   let micro = "";
-  if (trimmedYears.length >= 2) {
-    const delta = trimmedVals[trimmedVals.length-1] - trimmedVals[0];
-    micro += `近 ${trimmedYears.length} 年變動 ${delta>=0? "↑":"↓"} ${Math.abs(delta).toFixed(2)}`;
+  if (tYs.length>=2) {
+    const delta = tVs[tVs.length-1] - tVs[0];
+    micro += `近 ${tYs.length} 年 ${delta>=0?"↑":"↓"} ${Math.abs(delta).toFixed(2)}`;
   }
-  if (oecdAvg!=null && currentVal!=null) {
-    const ratio = currentVal / oecdAvg;
-    micro += (micro? "，": "") + `相對 OECD 平均 ${ratio.toFixed(2)} 倍`;
+  if (avg!=null && cur!=null) {
+    micro += (micro? "，": "") + `相對 OECD 平均 ${ (cur/avg).toFixed(2) } 倍`;
   }
 
-  // Render card
   statisticsPanelEl.innerHTML = `
-    <div class="stat-card" style="grid-column: 1 / -1; text-align:left">
+    <div class="stat-card" style="grid-column:1/-1;text-align:left">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
         <div>
-          <div class="stat-label" style="font-size:0.95rem;color:#334155">國家 / 地區</div>
+          <div class="stat-label" style="color:#334155">國家 / 地區</div>
           <div style="font-size:1.25rem;font-weight:700">${country}</div>
         </div>
         <div>
-          <div class="stat-label">${latestYear ? `數值（${latestYear}）` : "數值"}</div>
-          <div class="stat-value" style="font-size:1.5rem">${currentVal!=null? currentVal.toFixed(2) : "-"}</div>
+          <div class="stat-label">${latestYear?`數值（${latestYear}）`:"數值"}</div>
+          <div class="stat-value" style="font-size:1.5rem">${cur!=null? cur.toFixed(2): "-"}</div>
         </div>
         <div>
           <div class="stat-label">OECD 平均</div>
-          <div class="stat-value" style="font-size:1.25rem">${oecdAvg!=null? oecdAvg.toFixed(2) : "-"}</div>
+          <div class="stat-value" style="font-size:1.25rem">${avg!=null? avg.toFixed(2): "-"}</div>
         </div>
       </div>
-      <div style="margin-top:.75rem">
-        <canvas id="sparklineCanvas" height="60" aria-label="近年趨勢"></canvas>
-      </div>
-      <div style="margin-top:.5rem;color:#475569">${micro || "此指標的近年趨勢有限或缺年份。"}</div>
+      <div style="margin-top:.75rem"><canvas id="sparklineCanvas" height="60"></canvas></div>
+      <div style="margin-top:.5rem;color:#475569">${micro || "此指標缺乏連續年份，僅顯示最新資料。"}</div>
     </div>
   `;
 
-  // 畫 sparkline
   const cvs = document.getElementById("sparklineCanvas");
-  if (cvs && trimmedYears.length) {
+  if (cvs && tYs.length) {
     new Chart(cvs.getContext("2d"), {
       type: "line",
-      data: {
-        labels: trimmedYears,
-        datasets: [{ data: trimmedVals, borderWidth: 2, pointRadius: 0, tension: 0.3, fill:false }]
-      },
+      data: { labels: tYs, datasets: [{ data: tVs, borderWidth:2, pointRadius:0, tension:0.3, fill:false }]},
       options: {
-        responsive: true, maintainAspectRatio: false,
-        scales: { x: { display: false }, y: { display: false } },
-        plugins: { legend: { display:false }, tooltip: { enabled:false } }
+        responsive:true, maintainAspectRatio:false,
+        scales:{ x:{display:false}, y:{display:false} },
+        plugins:{ legend:{display:false}, tooltip:{enabled:false} }
       }
     });
   }
 }
-
-/* ===== Policy：原始表（收合/展開）===== */
-function renderPolicyTable() {
-  const rows = normalizedRows;
-  if (!rows || !rows.length) { dataTableEl.innerHTML = "<p>沒有資料</p>"; return; }
+function renderPHTableCollapsed() {
+  // 收合的原始表（country, year, value）
+  if (!normRows.length) { dataTableEl.innerHTML = "<p>沒有資料</p>"; return; }
   const cols = ["country","year","value"];
   const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>`;
-  const tbody = `<tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??""}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  const tbody = `<tbody>${normRows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??""}</td>`).join("")}</tr>`).join("")}</tbody>`;
   dataTableEl.innerHTML = `<table>${thead}${tbody}</table>`;
+  dataTableEl.style.display = "none"; // 預設收合
 }
 
-/* ===== 一般模式：篩選器（國家/年份）===== */
-function renderFiltersFromNormalized_general(rows, keys) {
-  // 清除舊篩選器（保留分頁/表頭/朝向）
-  Array.from(dataFiltersEl.querySelectorAll(".filter-group"))
-    .filter(el => !["sheetSelectorGroup","headerRowGroup","orientationGroup"].includes(el.id))
-    .forEach(el => el.remove());
-
-  const { countryKey, yearKey } = keys;
-
+/* ====== 一般模式（HC/HM 等）====== */
+function rowsFromNormToRaw(rows) { return rows.map(r=>({ Country:r.country, Year:r.year, Value:r.value })); }
+function renderGeneralFilters(rows, keys) {
+  dataFiltersEl.innerHTML = "";
   // 國家
-  const countries = Array.from(new Set(rows.map(r=>r[countryKey]).filter(Boolean))).sort();
+  const countries = Array.from(new Set(rows.map(r=>r[keys.countryKey]).filter(Boolean))).sort();
   const cg = document.createElement("div");
   cg.className = "filter-group";
   cg.innerHTML = `
@@ -518,11 +490,11 @@ function renderFiltersFromNormalized_general(rows, keys) {
     </select>
   `;
   dataFiltersEl.appendChild(cg);
-  cg.querySelector("select").addEventListener("change", renderAllFromFilters_general);
+  cg.querySelector("select").addEventListener("change", renderGeneralAll);
 
   // 年份
-  if (yearKey) {
-    const years = Array.from(new Set(rows.map(r=>r[yearKey]).filter(Boolean))).sort();
+  const years = Array.from(new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean))).sort();
+  if (years.length) {
     const yg = document.createElement("div");
     yg.className = "filter-group";
     yg.innerHTML = `
@@ -533,86 +505,78 @@ function renderFiltersFromNormalized_general(rows, keys) {
       </select>
     `;
     dataFiltersEl.appendChild(yg);
-    yg.querySelector("select").addEventListener("change", renderAllFromFilters_general);
+    yg.querySelector("select").addEventListener("change", renderGeneralAll);
   }
 }
-
-/* ===== 一般模式：篩選後 → 畫圖/表/統計 ===== */
-function renderAllFromFilters_general() {
-  if (!currentRawRows.length || !currentKeys) return;
-  const { countryKey, yearKey, valueKey } = currentKeys;
+function renderGeneralAll() {
+  if (!rawRows.length || !rawKeys) return;
   const cSel = document.getElementById("filterCountry");
   const ySel = document.getElementById("filterYear");
-  const selC = cSel ? cSel.value : "__all";
-  const selY = ySel ? ySel.value : "__all";
-
-  const rows = currentRawRows.filter(r=>{
-    if (selC !== "__all" && r[countryKey] !== selC) return false;
-    if (yearKey && selY !== "__all" && String(r[yearKey]) !== String(selY)) return false;
+  const sc = cSel ? cSel.value : "__all";
+  const sy = ySel ? ySel.value : "__all";
+  const rows = rawRows.filter(r => {
+    if (sc !== "__all" && r[rawKeys.countryKey] !== sc) return false;
+    if (sy !== "__all" && String(r[rawKeys.yearKey]) !== String(sy)) return false;
     return true;
   });
-
-  renderChart_general(rows, currentKeys);
-  renderTable_general(rows);
-  renderStats_general(rows, valueKey);
+  renderGeneralChart(rows, rawKeys);
+  renderGeneralTable(rows);
+  renderGeneralStats(rows, rawKeys.valueKey);
 }
-function renderChart_general(rows, keys) {
-  const { countryKey, yearKey, valueKey } = keys;
-  const canvas = document.getElementById("mainChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
+function renderGeneralChart(rows, keys) {
   if (currentChart) currentChart.destroy();
+  const ctx = mainChartEl.getContext("2d");
 
+  // 依你 HTML 的 chartType 下拉，但若沒有選，就自動
   let typeSel = chartTypeSelect ? chartTypeSelect.value : "auto";
-  if (typeSel==="auto") {
-    const uniqYears = yearKey ? new Set(rows.map(r=>r[yearKey]).filter(Boolean)) : new Set();
-    typeSel = uniqYears.size > 3 ? "line" : "bar";
+  if (typeSel === "horizontalBar") typeSel = "bar-horizontal"; // 兼容舊值
+  if (typeSel === "auto") {
+    const uniqY = new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean));
+    typeSel = uniqY.size > 3 ? "line" : "bar";
   }
   const isHorizontal = typeSel === "bar-horizontal";
 
-  const uniqCountries = Array.from(new Set(rows.map(r=>r[countryKey]).filter(Boolean)));
-  const uniqYears = yearKey ? Array.from(new Set(rows.map(r=>r[yearKey]).filter(Boolean))).sort() : [];
+  const uniqC = Array.from(new Set(rows.map(r=>r[keys.countryKey]).filter(Boolean)));
+  const uniqY = keys.yearKey ? Array.from(new Set(rows.map(r=>r[keys.yearKey]).filter(Boolean))).sort() : [];
 
-  let labels = [], data = [];
-  if (yearKey && uniqCountries.length === 1) {
-    labels = uniqYears;
-    data = labels.map(y => {
-      const f = rows.find(r => String(r[yearKey])===String(y));
-      return f ? Number(f[valueKey]) : null;
+  let labels=[], data=[];
+  if (keys.yearKey && uniqC.length === 1) {
+    labels = uniqY;
+    data   = labels.map(y => {
+      const f = rows.find(r=>String(r[keys.yearKey])===String(y));
+      return f ? Number(f[keys.valueKey]) : null;
     });
   } else {
-    labels = uniqCountries;
-    data = labels.map(c => {
-      const cs = rows.filter(r => r[countryKey] === c);
-      if (yearKey) {
-        const last = cs.sort((a,b)=>Number(a[yearKey]) - Number(b[yearKey])).at(-1);
-        return last ? Number(last[valueKey]) : null;
+    labels = uniqC;
+    data   = labels.map(c=>{
+      const cs = rows.filter(r=>r[keys.countryKey]===c);
+      if (keys.yearKey) {
+        const last = cs.sort((a,b)=>Number(a[keys.yearKey])-Number(b[keys.yearKey])).at(-1);
+        return last ? Number(last[keys.valueKey]) : null;
       } else {
-        return cs[0] ? Number(cs[0][valueKey]) : null;
+        return cs[0] ? Number(cs[0][keys.valueKey]) : null;
       }
     });
   }
 
   currentChart = new Chart(ctx, {
     type: isHorizontal ? "bar" : typeSel,
-    data: { labels, datasets: [{ label: "Value", data, borderWidth: 2, fill:false }] },
+    data: { labels, datasets:[{ label:"Value", data, borderWidth:2, fill:false }]},
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive:true, maintainAspectRatio:false,
       indexAxis: isHorizontal ? "y" : "x",
-      scales: { y: { beginAtZero: true } }
+      scales: { y: { beginAtZero:true } }
     }
   });
 }
-function renderTable_general(rows) {
-  if (!dataTableEl) return;
+function renderGeneralTable(rows) {
   if (!rows.length) { dataTableEl.innerHTML = "<p>沒有符合篩選條件的資料。</p>"; return; }
   const cols = Object.keys(rows[0]);
   const thead = `<thead><tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??""}</td>`).join("")}</tr>`).join("")}</tbody>`;
   dataTableEl.innerHTML = `<table>${thead}${tbody}</table>`;
 }
-function renderStats_general(rows, valueKey) {
-  if (!statisticsPanelEl) return;
+function renderGeneralStats(rows, valueKey) {
   if (!rows.length) { statisticsPanelEl.innerHTML = ""; return; }
   const nums = rows.map(r=>Number(r[valueKey])).filter(n=>!isNaN(n));
   const count= nums.length;
@@ -627,268 +591,17 @@ function renderStats_general(rows, valueKey) {
   `;
 }
 
-/* ===== 共用：分頁/表頭/朝向 控件（失敗或需調整時）===== */
-function renderSheetOrientationControls(workbook, selectedSheet, headerRowIndex, orientation) {
-  // 先清掉舊控件（保留 insight）
-  ["sheetSelectorGroup","headerRowGroup","orientationGroup","formatError","manualMappingGroup","policyPills"].forEach(id=>{
-    const el = document.getElementById(id);
-    if (el) el.remove();
-  });
-
-  // 工作表選擇
-  const sheetGroup = document.createElement("div");
-  sheetGroup.className = "filter-group";
-  sheetGroup.id = "sheetSelectorGroup";
-  const sheetOpts = workbook.SheetNames.map(n=>`<option value="${n}" ${n===selectedSheet?"selected":""}>${n}</option>`).join("");
-  sheetGroup.innerHTML = `
-    <label for="sheetSelector">工作表（分頁）</label>
-    <select id="sheetSelector">${sheetOpts}</select>
-  `;
-  dataFiltersEl.prepend(sheetGroup);
-
-  // 表頭列（1-based）
-  const headerGroup = document.createElement("div");
-  headerGroup.className = "filter-group";
-  headerGroup.id = "headerRowGroup";
-  const hdrSel = [];
-  for (let i=1;i<=200;i++) hdrSel.push(`<option value="${i}" ${headerRowIndex===i-1?"selected":""}>第 ${i} 列</option>`);
-  headerGroup.innerHTML = `
-    <label for="headerRowSelect">表頭列位置</label>
-    <select id="headerRowSelect">${hdrSel.join("")}</select>
-  `;
-  sheetGroup.after(headerGroup);
-
-  // 朝向
-  const orientGroup = document.createElement("div");
-  orientGroup.className = "filter-group";
-  orientGroup.id = "orientationGroup";
-  orientGroup.innerHTML = `
-    <label for="orientationSelect">資料朝向</label>
-    <select id="orientationSelect">
-      <option value="auto" ${!orientation||orientation==="auto"?"selected":""}>自動判斷</option>
-      <option value="long" ${orientation==="long"?"selected":""}>已是長表（Country/Year/Value）</option>
-      <option value="wide-year-in-columns" ${orientation==="wide-year-in-columns"?"selected":""}>國家在列、年份在欄</option>
-      <option value="wide-year-in-rows" ${orientation==="wide-year-in-rows"?"selected":""}>年份在列、國家在欄</option>
-    </select>
-  `;
-  headerGroup.after(orientGroup);
-
-  // 綁事件：任一變動就重新套用
-  const reapply = () => {
-    const sheetName = document.getElementById("sheetSelector").value;
-    const hdrIdx    = parseInt(document.getElementById("headerRowSelect").value,10) - 1;
-    let oriVal      = document.getElementById("orientationSelect").value;
-    const sheet = workbook.Sheets[sheetName];
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header:1, defval:null });
-    if (oriVal==="auto") {
-      oriVal = detectOrientationByHeader(matrix, hdrIdx) || "wide-year-in-columns";
-    }
-    applySheetTransform(sheetName, hdrIdx, oriVal);
-  };
-  document.getElementById("sheetSelector").addEventListener("change", reapply);
-  document.getElementById("headerRowSelect").addEventListener("change", reapply);
-  document.getElementById("orientationSelect").addEventListener("change", reapply);
-}
-
-/* ===== 格式錯誤提示 ===== */
-function showFormatError(msg) {
-  const old = document.getElementById("formatError");
-  if (old) old.remove();
-  const p = document.createElement("p");
-  p.id = "formatError";
-  p.style.color = "#ef4444";
-  p.style.marginTop = "0.5rem";
-  p.textContent = msg || "這個資料檔目前無法自動辨識欄位。";
-  dataFiltersEl.appendChild(p);
-
-  if (currentChart) currentChart.destroy();
-  dataTableEl.innerHTML = "";
-  statisticsPanelEl.innerHTML = "";
-}
-function clearFormatError() {
-  const old = document.getElementById("formatError");
-  if (old) old.remove();
-}
-
-/* ===== 手動欄位對應（長表用） ===== */
-function renderManualMappingPanel(rowsObj) {
-  removeManualMappingPanel();
-  const cols = Object.keys(rowsObj[0] || {});
-  const panel = document.createElement("div");
-  panel.className = "filter-group";
-  panel.id = "manualMappingGroup";
-  panel.innerHTML = `
-    <label>手動欄位對應</label>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.5rem;">
-      <div>
-        <small>國家 / 地區</small>
-        <select id="mapCountry">${cols.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
-      </div>
-      <div>
-        <small>年份（若無請選『無年份』）</small>
-        <select id="mapYear"><option value="__none">無年份</option>${cols.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
-      </div>
-      <div>
-        <small>值</small>
-        <select id="mapValue">${cols.map(c=>`<option value="${c}">${c}</option>`).join("")}</select>
-      </div>
-      <div style="align-self:end;">
-        <button id="mapApplyBtn" class="btn-download" type="button">套用欄位對應</button>
-      </div>
-    </div>
-  `;
-  dataFiltersEl.prepend(panel);
-
-  document.getElementById("mapApplyBtn").addEventListener("click", () => {
-    manualMapping = {
-      enabled: true,
-      country: document.getElementById("mapCountry").value || null,
-      year:    document.getElementById("mapYear").value || null,
-      value:   document.getElementById("mapValue").value || null
-    };
-    const long = normalizeLongTable(rowsObj);
-    const cleaned = cleanAndFilterRows(long);
-    if (!cleaned.length) {
-      showFormatError("套用後仍無有效數據，請確認欄位選擇或嘗試變更表頭列/朝向。");
-      return;
-    }
-    normalizedRows = cleaned;
-    clearFormatError();
-    if (isPolicyMode()) {
-      renderPolicyUIAndChart();
-    } else {
-      currentRawRows = rowsFromNormalizedBackToRawKeys(normalizedRows);
-      currentKeys = deriveKeysFromNormalized(currentRawRows);
-      renderFiltersFromNormalized_general(currentRawRows, currentKeys);
-      renderAllFromFilters_general();
-    }
+/* ====== 共用：下載、更新時間 ====== */
+function bindGlobals() {
+  if (downloadBtn) downloadBtn.addEventListener("click", () => {
+    if (!currentChart) return;
+    const a = document.createElement("a");
+    a.href = currentChart.toBase64Image();
+    a.download = (currentFile ? currentFile.name.replace(/\.xlsx?$/i,"") : "chart") + ".png";
+    a.click();
   });
 }
-function removeManualMappingPanel() {
-  const p = document.getElementById("manualMappingGroup");
-  if (p) p.remove();
-}
-
-/* ===== 長表：欄位映射到 {country,year,value} ===== */
-function normalizeLongTable(rows) {
-  if (!rows || !rows.length) return [];
-  const cols = Object.keys(rows[0] || {});
-  const pick = (aliases) => {
-    const lowerMap = Object.fromEntries(cols.map(n=>[n.toLowerCase(), n]));
-    for (const a of aliases) if (lowerMap[a.toLowerCase()]) return lowerMap[a.toLowerCase()];
-    for (const c of cols) {
-      const low = c.toLowerCase();
-      if (aliases.some(a=>low.includes(a.toLowerCase()))) return c;
-    }
-    return null;
-  };
-  let cKey = pick(COLUMN_ALIASES.country);
-  let yKey = pick(COLUMN_ALIASES.year);
-  let vKey = pick(COLUMN_ALIASES.value);
-
-  if (!vKey) vKey = cols.find(k => k!==cKey && k!==yKey) || cols[1];
-  if (!cKey || !vKey) return [];
-
-  if (manualMapping.enabled) {
-    cKey = manualMapping.country || cKey;
-    yKey = manualMapping.year === "__none" ? null : (manualMapping.year || yKey);
-    vKey = manualMapping.value || vKey;
-  }
-
-  return rows.map(r => ({
-    country: r[cKey],
-    year:    yKey ? r[yKey] : null,
-    value:   r[vKey]
-  }));
-}
-
-/* ===== 交叉表：年在欄（第一欄=國家；第二欄起=年份）→ melt ===== */
-function meltWideYearInColumns(header, body) {
-  const yearLabels = header.slice(1);
-  const out = [];
-  body.forEach(row => {
-    if (!row) return;
-    const country = safeCell(row[0]);
-    if (!country) return;
-    for (let j=1; j<row.length; j++) {
-      const yearLbl = yearLabels[j-1];
-      if (!isYearLike(yearLbl)) continue;
-      const value = row[j];
-      out.push({ country, year: extractYear(yearLbl), value });
-    }
-  });
-  return out;
-}
-
-/* ===== 交叉表：年在列（第一列=國家；第一欄=年份）→ melt ===== */
-function meltWideYearInRows(header, body) {
-  const countryLabels = header.slice(1);
-  const out = [];
-  body.forEach(r => {
-    if (!r) return;
-    const yearLbl = safeCell(r[0]);
-    if (!isYearLike(yearLbl)) return;
-    const yy = extractYear(yearLbl);
-    for (let j=1; j<r.length; j++) {
-      const country = countryLabels[j-1];
-      if (!country) continue;
-      const value = r[j];
-      out.push({ country, year: yy, value });
-    }
-  });
-  return out;
-}
-
-/* ===== 清理：去註解/空白、排除台灣、強化數值解析 ===== */
-function cleanAndFilterRows(rows) {
-  const cleaned = rows
-    .filter(r => r && r.country && r.value!==null && r.value!=="")
-    .map(r => ({
-      country: r.country,
-      year:    r.year ?? null,
-      value:   toNumberRobust(r.value)
-    }))
-    .filter(r => r.value !== null)
-    .filter(r => !/^source:|^note:/i.test(String(r.country)))
-    .filter(r => !EXCLUDE_CODES.includes(String(r.country)));
-  return cleaned;
-}
-function toNumberRobust(v) {
-  let s = String(v).trim();
-  s = s.replace(/[a-z\u00AA-\u02AF\u1D2C-\u1D7F\u2070-\u209F]/gi, ""); // 上標/註腳字母
-  s = s.replace(/[,%\s]/g, ""); // 逗號/空白/百分比
-  if (s === "" || s === "-" ) return null;
-  const n = parseFloat(s);
-  return isNaN(n) ? null : n;
-}
-
-/* ===== 共用小工具 ===== */
-function safeCell(x){ return x==null ? "" : String(x).trim(); }
-function extractYear(x){ const m = String(x||"").match(/(18|19|20)\d{2}/); return m ? m[0] : null; }
-
-/* ===== 畫面切換/標題 ===== */
-function showVisualizationArea() {
-  if (welcomeScreenEl) welcomeScreenEl.hidden = true;
-  if (visualizationAreaEl) visualizationAreaEl.hidden = false;
-}
-function renderDatasetTitle(name) { currentDatasetTitleEl.textContent = name; }
-
-/* ===== 全域事件 / 下載 / 更新時間 ===== */
-function bindGlobalEvents(){
-  if (chartTypeSelect) chartTypeSelect.addEventListener("change", ()=>{
-    if (!isPolicyMode()) renderAllFromFilters_general();
-  });
-  if (downloadBtn) downloadBtn.addEventListener("click", downloadChartImage);
-  if (sidebarToggleBtn && sidebarEl) sidebarToggleBtn.addEventListener("click", ()=>sidebarEl.classList.toggle("active"));
-}
-function downloadChartImage(){
-  if (!currentChart) return;
-  const a = document.createElement("a");
-  a.href = currentChart.toBase64Image();
-  a.download = (currentDatasetFile ? currentDatasetFile.name.replace(/\.xlsx?$/i,"") : "chart") + ".png";
-  a.click();
-}
-function setLastUpdateToday(){
+function setLastUpdateToday() {
   if (!lastUpdateEl) return;
   const now = new Date();
   lastUpdateEl.textContent = now.toISOString().slice(0,10);
