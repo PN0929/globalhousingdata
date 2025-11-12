@@ -1,50 +1,23 @@
 /* =========================================================================
    國際住宅數據庫 — Home + Topic Router + Definitions Explorer
    - Hash 路由：#/, #/definitions
-   - 首頁顯示主題卡（部分 Coming soon）
+   - 首頁：主題卡
    - Definitions Explorer：讀 CSV + 搜尋/標籤/比較
+   - 新增：同一國家多筆自動合併成單一卡片（卡內分段顯示）
    ======================================================================= */
 
 /** CSV 路徑（目前只用於 "各國社宅定義" 主題） */
 const CSV_URL = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
 
-/** 主題清單（你之後要開新主題，只要把 available 改 true 並在 router 裡加對應渲染器） */
+/** 主題清單 */
 const TOPICS = [
-  {
-    slug: "definitions",
-    emoji: "🏘️",
-    title: "各國社宅定義",
-    desc: "快速查找、比較各國社會住宅的稱呼與定義",
-    available: true,
-    cta: "開始探索"
-  },
-  {
-    slug: "conditions",
-    emoji: "📊",
-    title: "居住條件（HC）",
-    desc: "面積、人均空間、設備可近性等指標",
-    available: false,
-    cta: "即將推出"
-  },
-  {
-    slug: "market",
-    emoji: "🏠",
-    title: "住宅市場（HM）",
-    desc: "持有/租賃結構、房屋型態、價格與供給",
-    available: false,
-    cta: "即將推出"
-  },
-  {
-    slug: "policy",
-    emoji: "🧩",
-    title: "住宅政策（PH）",
-    desc: "補貼、租金管制、社宅供給、稅務與貸款措施",
-    available: false,
-    cta: "即將推出"
-  }
+  { slug: "definitions", emoji: "🏘️", title: "各國社宅定義", desc: "快速查找、比較各國社會住宅的稱呼與定義", available: true, cta: "開始探索" },
+  { slug: "conditions",  emoji: "📊", title: "居住條件（HC）", desc: "面積、人均空間、設備可近性等指標", available: false, cta: "即將推出" },
+  { slug: "market",      emoji: "🏠", title: "住宅市場（HM）", desc: "持有/租賃結構、房屋型態、價格與供給", available: false, cta: "即將推出" },
+  { slug: "policy",      emoji: "🧩", title: "住宅政策（PH）", desc: "補貼、租金管制、社宅供給、稅務與貸款措施", available: false, cta: "即將推出" }
 ];
 
-/** 快速標籤偵測規則（用於 definitions） */
+/** 快速標籤偵測規則（definitions 用） */
 const TAG_RULES = [
   { key: "HasPublicProvider",    label: "公部門提供",     regex: /(public|municipal|state[-\s]?owned|government|local authority|authorities)/i },
   { key: "HasNonProfitProvider", label: "非營利/合作社",   regex: /(non[-\s]?profit|co-?operative|cooperative)/i },
@@ -60,10 +33,8 @@ const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 
 function escapeHTML(s) {
   return String(s || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
 function shortText(s, n=180) {
@@ -72,7 +43,7 @@ function shortText(s, n=180) {
   if (clean.length <= n) return clean;
   const cut = clean.slice(0, n);
   const lastDot = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("。"));
-  return (lastDot > 60 ? cut.slice(0, lastDot+1) : cut + "…");
+  return (lastDot > 60 ? cut.slice(0, lastDot + 1) : cut + "…");
 }
 function csvParse(text) {
   // Simple CSV parser (handles commas inside quotes)
@@ -86,7 +57,7 @@ function csvParse(text) {
       else { cell += c; }
     } else {
       if (c === '"') inQ = true;
-      else if (c === "," ) { cur.push(cell); cell=""; }
+      else if (c === ",") { cur.push(cell); cell=""; }
       else if (c === "\n") { cur.push(cell); rows.push(cur); cur=[]; cell=""; }
       else if (c === "\r") { /* ignore */ }
       else { cell += c; }
@@ -105,7 +76,7 @@ window.addEventListener("DOMContentLoaded", () => {
 function renderRoute() {
   const hash = (location.hash || "#/").replace(/^#/, "");
   const main = $(".main-content");
-  main.innerHTML = ""; // clear
+  main.innerHTML = "";
 
   // nav active
   $$(".topnav .nav-link").forEach(a => a.classList.remove("active"));
@@ -138,9 +109,7 @@ function renderHome(root) {
     if (!card) return;
     const slug = card.dataset.slug;
     const topic = TOPICS.find(tt => tt.slug === slug);
-    if (topic?.available) {
-      location.hash = `#/${slug}`;
-    }
+    if (topic?.available) location.hash = `#/${slug}`;
   });
 }
 function topicCardHTML(t) {
@@ -152,9 +121,7 @@ function topicCardHTML(t) {
       <div class="topic-title">${escapeHTML(t.title)}</div>
       <div class="topic-desc">${escapeHTML(t.desc)}</div>
       <div class="topic-actions">
-        <button class="btn ${t.available ? "primary" : ""}">
-          ${t.cta}
-        </button>
+        <button class="btn ${t.available ? "primary" : ""}">${t.cta}</button>
       </div>
     </article>
   `;
@@ -162,7 +129,7 @@ function topicCardHTML(t) {
 
 /* ======================  Definitions Explorer ====================== */
 const DefState = {
-  data: [],
+  data: [],          // 合併後：[{ Country, items:[{TermsUsed, Definition, short, flags}], flagsCombined, termsJoined }]
   filtered: [],
   selectedTags: new Set(),
   selectedCountry: "ALL",
@@ -175,12 +142,8 @@ async function renderDefinitions(root) {
   section.id = "definitionsExplorer";
   section.innerHTML = `
     <div class="controls fade-in">
-      <div class="searchbox">
-        <input id="searchInput" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" />
-      </div>
-      <div class="selectbox">
-        <select id="countrySelect"></select>
-      </div>
+      <div class="searchbox"><input id="searchInput" type="text" placeholder="搜尋國家、稱呼或定義關鍵字…" /></div>
+      <div class="selectbox"><select id="countrySelect"></select></div>
       <div class="tags" id="tagBar"></div>
     </div>
 
@@ -219,24 +182,38 @@ async function loadDefinitionsCSV() {
     const idxDef     = headers.findIndex(h => /definition/i.test(h));
     if (idxCountry < 0 || idxDef < 0) throw new Error("缺少必要欄位 (Country/Definition)");
 
-    const data = rows.slice(1).map(r => {
-      const country = (r[idxCountry] || "").trim();
-      const terms   = (idxTerms >= 0 ? r[idxTerms] : "" ) || "";
-      const def     = (r[idxDef] || "").trim();
+    // 先讀為扁平陣列
+    const raw = rows.slice(1).map(r => {
+      const Country = (r[idxCountry] || "").trim();
+      const TermsUsed = ((idxTerms >= 0 ? r[idxTerms] : "") || "").trim();
+      const Definition = (r[idxDef] || "").trim();
+      const textForMatch = `${TermsUsed}\n${Definition}`;
       const flags = {};
-      const textForMatch = `${terms}\n${def}`;
       TAG_RULES.forEach(rule => flags[rule.key] = rule.regex.test(textForMatch));
-      return {
-        Country: country,
-        TermsUsed: terms,
-        Definition: def,
-        short: shortText(def, 200),
-        flags
-      };
+      return { Country, TermsUsed, Definition, short: shortText(Definition, 200), flags };
     }).filter(d => d.Country && d.Definition);
 
-    DefState.data = data;
-    DefState.filtered = data.slice();
+    // 依 Country 合併
+    const byCountry = new Map();
+    for (const item of raw) {
+      if (!byCountry.has(item.Country)) {
+        byCountry.set(item.Country, { Country: item.Country, items: [], flagsCombined: {}, termsSet: new Set() });
+      }
+      const grp = byCountry.get(item.Country);
+      grp.items.push({ TermsUsed: item.TermsUsed, Definition: item.Definition, short: item.short, flags: item.flags });
+      if (item.TermsUsed) grp.termsSet.add(item.TermsUsed);
+      // OR flags
+      TAG_RULES.forEach(r => { grp.flagsCombined[r.key] = (grp.flagsCombined[r.key] || item.flags[r.key]); });
+    }
+    const merged = Array.from(byCountry.values()).map(g => ({
+      Country: g.Country,
+      items: g.items,
+      flagsCombined: g.flagsCombined,
+      termsJoined: Array.from(g.termsSet).join("；")
+    })).sort((a,b)=>a.Country.localeCompare(b.Country));
+
+    DefState.data = merged;
+    DefState.filtered = merged.slice();
   } catch (err) {
     $("#cardsWrap").innerHTML = `
       <div class="empty">
@@ -251,33 +228,22 @@ function buildDefControls() {
   const uniqueCountries = Array.from(new Set(DefState.data.map(d => d.Country))).sort((a,b)=>a.localeCompare(b));
   const sel = $("#countrySelect");
   sel.innerHTML = `<option value="ALL">全部國家</option>` + uniqueCountries.map(c => `<option>${escapeHTML(c)}</option>`).join("");
-  sel.addEventListener("change", e => {
-    DefState.selectedCountry = e.target.value;
-    applyDefFilters();
-  });
+  sel.addEventListener("change", e => { DefState.selectedCountry = e.target.value; applyDefFilters(); });
 
-  $("#searchInput").addEventListener("input", e => {
-    DefState.searchText = e.target.value.trim();
-    applyDefFilters();
-  });
+  $("#searchInput").addEventListener("input", e => { DefState.searchText = e.target.value.trim(); applyDefFilters(); });
 
   const tagBar = $("#tagBar");
-  tagBar.innerHTML = TAG_RULES.map(t =>
-    `<button class="tag" data-key="${t.key}">${t.label}</button>`
-  ).join("");
+  tagBar.innerHTML = TAG_RULES.map(t => `<button class="tag" data-key="${t.key}">${t.label}</button>`).join("");
   tagBar.addEventListener("click", e => {
-    const btn = e.target.closest(".tag");
-    if (!btn) return;
+    const btn = e.target.closest(".tag"); if (!btn) return;
     const key = btn.dataset.key;
-    if (DefState.selectedTags.has(key)) DefState.selectedTags.delete(key);
-    else DefState.selectedTags.add(key);
+    if (DefState.selectedTags.has(key)) DefState.selectedTags.delete(key); else DefState.selectedTags.add(key);
     btn.classList.toggle("active");
     applyDefFilters();
   });
 
   $("#btnClearCompare").addEventListener("click", () => {
-    DefState.compareSet.clear();
-    renderDefCompare();
+    DefState.compareSet.clear(); renderDefCompare();
     $$(".card input[type='checkbox']").forEach(cb => (cb.checked = false));
   });
   $("#btnCopyCompare").addEventListener("click", copyDefCompare);
@@ -287,9 +253,15 @@ function applyDefFilters() {
   const q = DefState.searchText.toLowerCase();
   DefState.filtered = DefState.data.filter(d => {
     if (DefState.selectedCountry !== "ALL" && d.Country !== DefState.selectedCountry) return false;
-    for (const key of DefState.selectedTags) if (!d.flags[key]) return false;
+    // tag filters: 全部成立（對合併旗標）
+    for (const key of DefState.selectedTags) if (!d.flagsCombined[key]) return false;
+    // 文字搜尋：country + 所有 terms + 所有 definitions
     if (q) {
-      const hay = (d.Country + " " + d.TermsUsed + " " + d.Definition).toLowerCase();
+      const hay = [
+        d.Country,
+        d.termsJoined,
+        ...d.items.map(i => i.Definition)
+      ].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -297,40 +269,46 @@ function applyDefFilters() {
   renderDefCards();
 }
 
-function renderDefAll() {
-  renderDefCards();
-  renderDefCompare();
-}
+function renderDefAll() { renderDefCards(); renderDefCompare(); }
 
 function renderDefCards() {
   const wrap = $("#cardsWrap");
   const empty = $("#emptyState");
   if (!DefState.filtered.length) {
-    wrap.innerHTML = "";
-    empty.style.display = "block";
-    return;
+    wrap.innerHTML = ""; empty.style.display = "block"; return;
   }
   empty.style.display = "none";
-
   wrap.innerHTML = DefState.filtered.map((d, idx) => defCardHTML(d, idx)).join("");
   wrap.addEventListener("click", onDefCardClick, { once: true });
 }
 
 function defCardHTML(d, idx) {
-  const chips = TAG_RULES
-    .filter(t => d.flags[t.key])
-    .slice(0, 3)
-    .map(t => `<span class="chip">${t.label}</span>`)
-    .join("");
+  // Chips from combined flags
+  const chips = TAG_RULES.filter(t => d.flagsCombined[t.key]).slice(0, 3)
+               .map(t => `<span class="chip">${t.label}</span>`).join("");
 
   const checked = DefState.compareSet.has(d.Country) ? "checked" : "";
   const safeCountry = escapeHTML(d.Country);
-  const safeTerms   = escapeHTML(d.TermsUsed || "—");
-  const safeShort   = escapeHTML(d.short);
-  const safeFull    = escapeHTML(d.Definition);
+  const safeTerms   = escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"));
+
+  // Summary 用第一筆的 short
+  const safeShort   = escapeHTML(d.items[0]?.short || "");
+
+  // 多筆定義 → show badge + 逐段列出
+  const multiple = d.items.length > 1;
+  const variantsHTML = d.items.map((it, i) => {
+    const t = escapeHTML(it.TermsUsed || "—");
+    const full = escapeHTML(it.Definition);
+    return `
+      <div class="variant">
+        <div class="variant-header"><span class="vindex">#${i+1}</span>${t}</div>
+        <div class="variant-body">${full}</div>
+      </div>
+    `;
+  }).join("");
 
   return `
-    <article class="card" data-idx="${idx}">
+    <article class="card ${multiple ? "multiple" : ""}" data-idx="${idx}">
       <div class="card-header">
         <div>
           <div class="country">${safeCountry}</div>
@@ -341,12 +319,18 @@ function defCardHTML(d, idx) {
           加入比較
         </label>
       </div>
+
       <div class="summary">${safeShort}</div>
+
       <div class="actions">
         <button class="btn toggle">展開全文</button>
+        ${multiple ? `<span class="badge">共 ${d.items.length} 個定義</span>` : ""}
         <div class="chips">${chips}</div>
       </div>
-      <div class="fulltext" style="display:none;">${safeFull}</div>
+
+      <div class="fulltext" style="display:none;">
+        ${variantsHTML}
+      </div>
     </article>
   `;
 }
@@ -364,9 +348,7 @@ function onDefCardClick(e) {
     const country = cmp.dataset.country;
     if (cmp.checked) {
       if (DefState.compareSet.size >= 3) {
-        cmp.checked = false;
-        alert("一次最多比較 3 個國家");
-        return;
+        cmp.checked = false; alert("一次最多比較 3 個國家"); return;
       }
       DefState.compareSet.add(country);
     } else {
@@ -392,10 +374,12 @@ function renderDefCompare() {
   const items = arr.map((c) => {
     const d = DefState.data.find(x => x.Country === c);
     const bullets = deriveDefBullets(d).map(b => `• ${escapeHTML(b)}`).join("<br>");
+    const terms = d.termsJoined || (d.items[0]?.TermsUsed || "—");
+    const multiNote = d.items.length > 1 ? `（${d.items.length} 個定義）` : "";
     return `
       <div class="compare-item">
-        <h4>${escapeHTML(d.Country)}</h4>
-        <div class="mini"><strong>稱呼：</strong>${escapeHTML(d.TermsUsed || "—")}</div>
+        <h4>${escapeHTML(d.Country)}${multiNote}</h4>
+        <div class="mini"><strong>稱呼：</strong>${escapeHTML(terms)}</div>
         <div class="mini" style="margin-top:4px">${bullets}</div>
       </div>
     `;
@@ -405,14 +389,15 @@ function renderDefCompare() {
 }
 
 function deriveDefBullets(d) {
+  const f = d.flagsCombined || {};
   const out = [];
-  if (d.flags.HasPublicProvider) out.push("由公部門/地方政府提供或管理");
-  if (d.flags.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
-  if (d.flags.HasBelowMarketRent) out.push("租金低於市價或受管制");
-  if (d.flags.HasIncomeTargeting) out.push("針對低收入/弱勢族群，需收入審查");
-  if (d.flags.HasSubsidyOrLoans) out.push("提供補貼/貸款/稅務優惠等支持");
-  if (d.flags.LegalDefined) out.push("有法律/法規上的明確定義");
-  if (!out.length) out.push(shortText(d.Definition, 120));
+  if (f.HasPublicProvider)    out.push("由公部門/地方政府提供或管理");
+  if (f.HasNonProfitProvider) out.push("非營利/合作社為主要提供者之一");
+  if (f.HasBelowMarketRent)   out.push("租金低於市價或受管制");
+  if (f.HasIncomeTargeting)   out.push("針對低收入/弱勢族群，需收入審查");
+  if (f.HasSubsidyOrLoans)    out.push("提供補貼/貸款/稅務優惠等支持");
+  if (f.LegalDefined)         out.push("有法律/法規上的明確定義");
+  if (!out.length) out.push(shortText(d.items[0]?.Definition || "", 120));
   return out.slice(0, 5);
 }
 
@@ -423,8 +408,8 @@ async function copyDefCompare() {
     const blocks = arr.map(c => {
       const d = DefState.data.find(x => x.Country === c);
       const lines = [
-        `國家：${d.Country}`,
-        `稱呼：${d.TermsUsed || "—"}`,
+        `國家：${d.Country}${d.items.length>1 ? `（${d.items.length} 個定義）` : ""}`,
+        `稱呼：${d.termsJoined || (d.items[0]?.TermsUsed || "—")}`,
         `重點：${deriveDefBullets(d).join("；")}`,
       ];
       return lines.join("\n");
