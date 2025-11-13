@@ -1,6 +1,6 @@
 /* =================== AI 開關與後端位址 =================== */
 const ENABLE_AI = true; // 走真 AI（Cloudflare Worker）→ true；本地規則摘要 → false
-const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址
+const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址（結尾不要有斜線）
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
 const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
@@ -97,7 +97,7 @@ function renderRoute(){
 function getQueryParams(hash){
   const qIndex = hash.indexOf("?"); const out = {};
   if(qIndex === -1) return out;
-  const q = hash.slice(qIndex+1);
+  const q = hash.slice(1 + qIndex);
   q.split("&").forEach(kv=>{
     const [k,v] = kv.split("=");
     out[decodeURIComponent(k||"")] = decodeURIComponent((v||"").replace(/\+/g," "));
@@ -988,7 +988,7 @@ function collectVisibleTableData() {
   const rows = Array.from(table.querySelectorAll("tbody tr")).map(tr => {
     const cells = Array.from(tr.querySelectorAll("td")).map(td => td.innerText.trim());
     const obj = {};
-    columns.forEach((col, i) => obj[col] = cells[i] ?? "";
+    columns.forEach((col, i) => { obj[col] = cells[i] ?? ""; });
     return obj;
   });
 
@@ -1118,7 +1118,7 @@ function renderAIChat(root){
       <div class="ai-chat-log" id="aiLog"></div>
       <div class="ai-actions"><span id="aiStatus" class="status"></span></div>
     </div>
-  `;
+  ";
   root.appendChild(sec);
 
   // 快速提問
