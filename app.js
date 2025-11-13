@@ -1,6 +1,6 @@
 /* =================== AI 開關與後端位址 =================== */
-const ENABLE_AI = true; // 走真 AI（Cloudflare Worker）→ true；本地規則摘要 → false
-const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址（結尾不要有斜線）
+const ENABLE_AI = true;
+const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev";
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
 const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
@@ -15,21 +15,24 @@ const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
 function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
 function countryParam(name){ return encodeURIComponent(String(name||"").replace(/\s+/g," ").trim()); }
-
-/* 顯示用：把國名最後面的編號/年份去掉（如 "Austria (2)"、"Japan 2023"、"Canada-2021"） */
 function cleanCountryName(s){
   const t = String(s || "").trim();
-  return t
-    .replace(/\s*\(\s*\d+(?:\.\d+)?\s*\)\s*$/,'')     // 結尾 "(2)" 或 "(2023)"
-    .replace(/\s*[-–—]\s*\d+(?:\.\d+)?\s*$/,'')       // 結尾 "- 2023" / "– 2023"
-    .replace(/\s+\d+(?:\.\d+)?\s*$/,'')               // 結尾空白+數字 " 2023"
-    .trim();
+  return t.replace(/\s*\(\s*\d+(?:\.\d+)?\s*\)\s*$/,'').replace(/\s*[-–—]\s*\d+(?:\.\d+)?\s*$/,'').replace(/\s+\d+(?:\.\d+)?\s*$/,'').trim();
+}
+function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function idxByAliases(headers, aliases){
+  const keys = headers.map(h => normKey(h));
+  for (const a of aliases){ const i = keys.indexOf(a); if (i !== -1) return i; }
+  return -1;
+}
+function normSearch(s){
+  return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
 }
 
-/* CSV 解析（支援 BOM / 引號 / 逗號 / 換行） */
+/* CSV 解析 */
 function csvParse(text){
   if (!text) return [];
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // 去 BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows=[]; let cur=[],cell="",inQ=false;
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
@@ -48,43 +51,23 @@ function csvParse(text){
   return rows;
 }
 
-/* 標頭正規化 & 欄位別名 */
-function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
-function idxByAliases(headers, aliases){
-  const keys = headers.map(h => normKey(h));
-  for (const a of aliases){ const i = keys.indexOf(a); if (i !== -1) return i; }
-  return -1;
-}
-
-/* 強韌搜尋：去重音/小寫/非字元換空白 */
-function normSearch(s){
-  return String(s||"")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g," ")
-    .trim();
-}
-
 /* =================== 路由 =================== */
 window.addEventListener("DOMContentLoaded", () => {
   ensureTopnavActive();
-  ensureAIModal();      // 若 HTML 沒放 Modal，這裡會自動注入
+  ensureAIModal();
   renderRoute();
   window.addEventListener("hashchange", () => { ensureTopnavActive(); renderRoute(); });
 });
-
 function ensureTopnavActive(){
   const m = (location.hash.replace(/^#\//,"") || "").split("?")[0] || "home";
   $$(".topnav .nav-link").forEach(a=>a.classList.remove("active"));
   const el = $(`.topnav .nav-link[data-route="${m}"]`);
   if(el) el.classList.add("active");
 }
-
 function renderRoute(){
   const hash = (location.hash || "#/").replace(/^#/, "");
   const main = $(".main-content"); if(!main) return;
   main.innerHTML = "";
-
   if(hash.startsWith("/definitions"))       renderDefinitions(main);
   else if(hash.startsWith("/eligibility"))  renderEligibility(main);
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
@@ -93,10 +76,8 @@ function renderRoute(){
   else if(hash.startsWith("/ai"))           renderAIChat(main);
   else renderHome(main);
 }
-
 function getQueryParams(hash){
-  const qIndex = hash.indexOf("?");
-  const out = {};
+  const qIndex = hash.indexOf("?"); const out = {};
   if(qIndex === -1) return out;
   const q = hash.slice(qIndex+1);
   q.split("&").forEach(kv=>{
@@ -115,7 +96,6 @@ const TOPICS = [
   { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",     available: true,  cta: "查看特徵" },
   { slug: "ai",              emoji: "🤖", title: "AI 對話（資料庫問答）", desc: "開放式提問：比較、摘要、差異與排名等", available: true,  cta: "開始對話" },
 ];
-
 function renderHome(root){
   const wrap = document.createElement("section");
   wrap.className = "home fade-in";
@@ -250,7 +230,7 @@ function renderDefCards(){
         <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
       </div>`).join("");
-    const long = (d.items[0]?.Definition || "").length > 400; // 只有長文保留展開全文
+    const long = (d.items[0]?.Definition || "").length > 400;
     return `
       <article class="card def-card ${multiple?"multiple":""}">
         <div class="card-header">
@@ -284,7 +264,6 @@ function renderDefCards(){
       </article>`;
   }).join("");
 
-  // 展開/收合全文（僅長卡顯示）
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
     if(btn){
@@ -296,7 +275,6 @@ function renderDefCards(){
     }
   };
 
-  // 卡片上的 AI 摘要按鈕（點擊才呼叫 API）
   wrap.querySelectorAll(".ai-sum").forEach(btn=>{
     btn.addEventListener("click", async ()=>{
       const country = btn.getAttribute("data-country") || "";
@@ -306,7 +284,6 @@ function renderDefCards(){
   });
 }
 
-/* 產生單張卡片的 AI 摘要（以 definitions + 其它三表匯總） */
 async function generateCardAISummary(cardEl, country){
   ensureAIModal();
   const modal = $("#ai-modal"); const body = $("#ai-body");
@@ -314,7 +291,7 @@ async function generateCardAISummary(cardEl, country){
   if (modal) modal.style.display = "flex";
 
   try{
-    const data = collectVisibleTableData(); // 以可視表為主，省 API 費用
+    const data = collectVisibleTableData();
     const payload = {
       topic: "definitions",
       mode: "card",
@@ -340,7 +317,6 @@ async function generateCardAISummary(cardEl, country){
 
 /* =================== 申請資格 =================== */
 const EliState = { raw:[], view:"matrix", search:"" };
-
 async function renderEligibility(root){
   const sec=document.createElement("section"); sec.id="eligibility";
   sec.innerHTML = `
@@ -374,22 +350,16 @@ async function renderEligibility(root){
     <div id="eli_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
   root.appendChild(sec);
-
-  await loadEligibility();
-  bindEligibilityControls();
-  renderEligibilityView();
+  await loadEligibility(); bindEligibilityControls(); renderEligibilityView();
 }
-
 async function loadEligibility(){
   let text=""; 
   try{
     const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_ELIGIBILITY failed:", err); EliState.raw=[]; return; }
-
   const rows = csvParse(text); if(!rows.length){ EliState.raw=[]; return; }
   const h = rows[0];
-
   const col = {
     Country: idxByAliases(h, ["country"]),
     CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
@@ -400,24 +370,13 @@ async function loadEligibility(){
     Emp: idxByAliases(h, ["employment"]),
     Note:idxByAliases(h, ["othernotes","notes","note"])
   };
-
   EliState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c  = get(col.Country);
     if(!c) return null;
-    return {
-      c,
-      cn: get(col.CountryNormalized) || c,
-      All: get(col.All,"NA"),
-      Inc: get(col.Inc,"NA"),
-      PR:  get(col.PR,"NA"),
-      Res: get(col.Res,"NA"),
-      Emp: get(col.Emp,"NA"),
-      Note:get(col.Note,"")
-    };
+    return { c, cn: get(col.CountryNormalized) || c, All: get(col.All,"NA"), Inc: get(col.Inc,"NA"), PR:  get(col.PR,"NA"), Res: get(col.Res,"NA"), Emp: get(col.Emp,"NA"), Note:get(col.Note,"") };
   }).filter(Boolean);
 }
-
 function bindEligibilityControls(){
   $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
   $("#eli_sort").addEventListener("change",renderEligibilityView);
@@ -427,7 +386,6 @@ function bindEligibilityControls(){
     const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search=""; EliState.quick={key:k,val:v}; renderEligibilityView();
   });
 }
-
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
@@ -443,7 +401,6 @@ function filterEligibility(data){
     return true;
   });
 }
-
 function sortEligibility(arr){
   const how=$("#eli_sort").value;
   if(how==="score"){
@@ -451,7 +408,6 @@ function sortEligibility(arr){
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderEligibilityView(){
   const mount=$("#eli_mount"), empty=$("#eli_empty");
   let data = filterEligibility(EliState.raw.slice()); sortEligibility(data);
@@ -505,7 +461,6 @@ function renderEligibilityView(){
 
 /* =================== 再審查頻率 =================== */
 const ReaState = { raw:[], search:"", sort:"az", preselectCountry:null };
-
 async function renderReassessment(root, params={}){
   ReaState.preselectCountry = params.country || null;
   const sec=document.createElement("section"); sec.id="reassessment";
@@ -529,12 +484,8 @@ async function renderReassessment(root, params={}){
     <div id="rea_mount" class="fade-in"></div>
     <div id="rea_empty" class="empty" style="display:none;">沒有符合條件的國家</div>`;
   root.appendChild(sec);
-
-  await loadReassessment();
-  bindReassessmentControls();
-  renderReassessmentTable();
+  await loadReassessment(); bindReassessmentControls(); renderReassessmentTable();
 }
-
 async function loadReassessment(){
   let text="";
   try{
@@ -558,17 +509,14 @@ async function loadReassessment(){
   }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
-
 function bindReassessmentControls(){
   $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
   $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
 }
-
 function filterReassessment(d){
   const q=ReaState.search; if(!q) return d;
   return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].map(normSearch).join(" | ").includes(normSearch(q)));
 }
-
 function sortReassessment(arr){
   if(ReaState.sort==="freq"){
     const order=["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
@@ -576,7 +524,6 @@ function sortReassessment(arr){
     arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderReassessmentTable(){
   const mount=$("#rea_mount"), empty=$("#rea_empty");
   let data = filterReassessment(ReaState.raw.slice()); sortReassessment(data);
@@ -607,17 +554,14 @@ function renderReassessmentTable(){
 
 /* =================== 優先分配 =================== */
 const PriState = { raw:[], search:"", quick:null, sort:"az", preselectCountry:null };
-
 async function renderPriority(root, params={}){
   PriState.preselectCountry = params.country || null;
-
   const sec=document.createElement("section"); sec.id="priority";
   sec.innerHTML = `
     <div class="home-hero" style="margin-top:20px;">
       <h2>優先分配條件（Priority allocation）</h2>
       <p class="note">比較各國對等待名單、收入、身心障礙、長者、庇護申請者、族群、家戶組成與現住房況等優先規則。</p>
     </div>
-
     <div class="controls fade-in">
       <div class="searchbox"><input id="pri_search" type="text" placeholder="搜尋國家或敘述…" /></div>
       <div class="selectbox">
@@ -637,7 +581,6 @@ async function renderPriority(root, params={}){
         <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       </div>
     </div>
-
     <div id="pri_mount" class="fade-in"></div>
     <div id="pri_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
@@ -647,14 +590,12 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
-
 async function loadPriority(){
   let text="";
   try{
     const resp = await fetch(CSV_PRIORITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_PRIORITY failed:", err); PriState.raw=[]; return; }
-
   const rows = csvParse(text); if(!rows.length){ PriState.raw=[]; return; }
   const h = rows[0];
   const col = {
@@ -670,27 +611,13 @@ async function loadPriority(){
     Cond: idxByAliases(h, ["currenthousingconditions","housingconditions","currenthousing"]),
     Note: idxByAliases(h, ["othernotes","notes","note"])
   };
-
   PriState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c=get(col.Country); if(!c) return null;
-    return {
-      c,
-      cn:get(col.CountryNormalized)||c,
-      Wait:get(col.Wait,"NA"),
-      Income:get(col.Income,"NA"),
-      Dis:get(col.Dis,"NA"),
-      Eld:get(col.Eld,"NA"),
-      Asy:get(col.Asy,"NA"),
-      Eth:get(col.Eth,"NA"),
-      HH:get(col.HH,"NA"),
-      Cond:get(col.Cond,"NA"),
-      Note:get(col.Note,"")
-    };
+    return { c, cn:get(col.CountryNormalized)||c, Wait:get(col.Wait,"NA"), Income:get(col.Income,"NA"), Dis:get(col.Dis,"NA"), Eld:get(col.Eld,"NA"), Asy:get(col.Asy,"NA"), Eth:get(col.Eth,"NA"), HH:get(col.HH,"NA"), Cond:get(col.Cond,"NA"), Note:get(col.Note,"") };
   }).filter(Boolean);
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
-
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -699,7 +626,6 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
-
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
@@ -715,20 +641,17 @@ function filterPriority(data){
     return true;
   });
 }
-
 function sortPriority(arr){
   if(PriState.sort==="score"){
     const score=d=>["Wait","Income","Dis","Eld","Asy","Eth","HH","Cond"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderPriorityTable(){
   const mount=$("#pri_mount"), empty=$("#pri_empty");
   let data = filterPriority(PriState.raw.slice()); sortPriority(data);
   if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
   empty.style.display="none";
-
   mount.innerHTML = `
     <div class="matrix">
       <table class="table">
@@ -775,17 +698,14 @@ function renderPriorityTable(){
 
 /* =================== 社宅特徵 =================== */
 const ChaState = { raw:[], search:"", sort:"az", preselectCountry:null };
-
 async function renderCharacteristics(root, params={}){
   ChaState.preselectCountry = params.country || null;
-
   const sec=document.createElement("section"); sec.id="characteristics";
   sec.innerHTML = `
     <div class="home-hero" style="margin-top:20px;">
       <h2>社宅特徵（Characteristics of social rental housing）</h2>
       <p class="note">定價方式（市場/成本/所得/效用）、租金調整（定期/不定期）、社宅租金占市場租金％、承租戶購屋權（含註記）。</p>
     </div>
-
     <div class="controls fade-in">
       <div class="searchbox"><input id="cha_search" type="text" placeholder="搜尋國家、關鍵字…" /></div>
       <div class="selectbox">
@@ -801,34 +721,23 @@ async function renderCharacteristics(root, params={}){
         <a class="btn" href="#/reassessment">→ 再審查頻率</a>
       </div>
     </div>
-
     <div id="cha_notice" class="empty" style="display:none;"></div>
     <div id="cha_mount" class="fade-in"></div>
     <div id="cha_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
   root.appendChild(sec);
-
-  await loadCharacteristics();
-  bindCharacteristicsControls();
-
-  if(ChaState.preselectCountry){
-    const ip = $("#cha_search"); if(ip) ip.value = ChaState.preselectCountry;
-    ChaState.search = ChaState.preselectCountry;
-  }
-
+  await loadCharacteristics(); bindCharacteristicsControls();
+  if(ChaState.preselectCountry){ const ip=$("#cha_search"); if(ip) ip.value=ChaState.preselectCountry; ChaState.search=ChaState.preselectCountry; }
   renderCharacteristicsTable();
 }
-
 async function loadCharacteristics(){
   let text="";
   try{
     const resp = await fetch(CSV_CHARACTERISTICS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_CHARACTERISTICS failed:", err); ChaState.raw=[]; return; }
-
   const rows = csvParse(text); if(!rows.length){ ChaState.raw=[]; return; }
   const h = rows[0];
-
   const col = {
     Country: idxByAliases(h, ["country"]),
     CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
@@ -842,31 +751,16 @@ async function loadCharacteristics(){
     Buy: idxByAliases(h, ["sittingtenantrighttobuynorm","righttobuynorm","righttobuy"]),
     BuyNote: idxByAliases(h, ["sittingtenantrighttobuynotes","righttobuynotes","notes","othernotes"])
   };
-
   ChaState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c=get(col.Country); if(!c) return null;
-    return {
-      c,
-      cn:get(col.CountryNormalized)||c,
-      MB:get(col.MB,"NA"),
-      CB:get(col.CB,"NA"),
-      IB:get(col.IB,"NA"),
-      UB:get(col.UB,"NA"),
-      IncReg:get(col.IncReg,"NA"),
-      IncNot:get(col.IncNot,"NA"),
-      Pct:get(col.Pct,""),
-      Buy:get(col.Buy,"NA"),
-      BuyNote:get(col.BuyNote,"")
-    };
+    return { c, cn:get(col.CountryNormalized)||c, MB:get(col.MB,"NA"), CB:get(col.CB,"NA"), IB:get(col.IB,"NA"), UB:get(col.UB,"NA"), IncReg:get(col.IncReg,"NA"), IncNot:get(col.IncNot,"NA"), Pct:get(col.Pct,""), Buy:get(col.Buy,"NA"), BuyNote:get(col.BuyNote,"") };
   }).filter(Boolean);
 }
-
 function bindCharacteristicsControls(){
   $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
-
 function filterCharacteristics(data){
   const qRaw = ChaState.search;
   if(!qRaw) return data;
@@ -876,14 +770,12 @@ function filterCharacteristics(data){
     return hay.includes(q);
   });
 }
-
 function sortCharacteristics(arr){
   if(ChaState.sort==="score"){
     const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderCharacteristicsTable(){
   const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice");
   let data = filterCharacteristics(ChaState.raw.slice());
@@ -960,7 +852,7 @@ function pill(v){
   return `<span class="pill na">NA</span>`;
 }
 
-/* =================== AI Modal：若缺少就自動注入 =================== */
+/* =================== AI Modal =================== */
 function ensureAIModal(){
   if (document.getElementById("ai-modal")) return;
   const div = document.createElement("div");
@@ -984,7 +876,6 @@ function ensureAIModal(){
 function collectVisibleTableData() {
   const table = document.querySelector(".matrix table");
   if (!table) return { columns: [], rows: [] };
-
   const columns = Array.from(table.querySelectorAll("thead th")).map(th => th.textContent.trim());
   const rows = Array.from(table.querySelectorAll("tbody tr")).map(tr => {
     const cells = Array.from(tr.querySelectorAll("td")).map(td => td.innerText.trim());
@@ -992,10 +883,8 @@ function collectVisibleTableData() {
     columns.forEach((col, i) => { obj[col] = cells[i] ?? ""; });
     return obj;
   });
-
   return { columns, rows };
 }
-
 function computeYesShare(data) {
   const stats = { yesShareByField: {} };
   const rows = data.rows || [];
@@ -1009,94 +898,16 @@ function computeYesShare(data) {
   return stats;
 }
 
-/* =================== 本地規則摘要（零後端 fallback） =================== */
+/* =================== 本地規則摘要（fallback） =================== */
 function localSummarize(topic, data) {
   const { columns, rows } = data || {};
-  if (!rows || !rows.length) return "<p>No visible data to summarize.</p>";
-
-  const params = new URLSearchParams((location.hash.split("?")[1] || ""));
-  const targetCountry = params.get("country");
-  const pickRow = targetCountry
-    ? rows.find(r => (r.Country || r["Country"] || "").toLowerCase().includes((targetCountry||"").toLowerCase())) || rows[0]
-    : rows[0];
-
-  const stats = computeYesShare(data);
-  const pctLine = Object.entries(stats.yesShareByField)
-    .filter(([k,v]) => v >= 0 && v <= 1)
-    .slice(0,3)
-    .map(([k,v]) => `${k}: ${(v*100).toFixed(0)}% YES`)
-    .join(" · ");
-
-  function pillify(v){ const t=String(v||"NA").toUpperCase(); return t==="YES"?"YES":(t==="NO"?"NO":"NA"); }
-
-  let html = "";
-  if (topic === "eligibility") {
-    const c = pickRow.Country || "This country";
-    const all = pillify(pickRow["All"]);
-    const inc = pillify(pickRow["Income"] || pickRow["Income threshold"]);
-    const pr  = pillify(pickRow["Citizenship/PR"] || pickRow["Citizenship / Perm. Residency"]);
-    const res = pillify(pickRow["Residency"] || pickRow["Local residency"]);
-    const emp = pillify(pickRow["Employment"]);
-    const note= pickRow["Notes"] || pickRow["Other"] || "";
-
-    html = `
-      <p><strong>Overview.</strong> Who can access social rental housing and typical gatekeeping criteria.</p>
-      <ul>
-        <li><strong>${c}</strong>: All-eligible=${all}, Income=${inc}, Citizenship/PR=${pr}, Residency=${res}, Employment=${emp}.</li>
-        <li>Across the dataset → ${pctLine || "mixed/insufficient for a clear pattern"}.</li>
-        <li>${note ? ("Note: " + note) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "priority") {
-    const c = pickRow.Country || "This country";
-    const fields = ["Waiting list","Income","Disability","Elderly","Asylum seekers","Ethnic minority","Household size","Current housing"];
-    const bullets = fields.filter(f => f in pickRow).map(f => `${f}=${pillify(pickRow[f])}`).join(", ");
-    html = `
-      <p><strong>Overview.</strong> Which applicant groups receive priority in allocation.</p>
-      <ul>
-        <li><strong>${c}</strong> priority flags → ${bullets || "—"}.</li>
-        <li>Typical cross-country patterns: ${pctLine || "varied with no dominant pattern"}.</li>
-        <li>${pickRow["Notes"] ? ("Notes: " + pickRow["Notes"]) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "reassessment") {
-    const c = pickRow.Country || "This country";
-    const freq = pickRow["Frequency"] || pickRow["Standardized frequency"] || "—";
-    const seg  = pickRow["Segment"] || "—";
-    const det  = pickRow["Detail"] || pickRow["Notes"] || "—";
-    html = `
-      <p><strong>Overview.</strong> How often tenant eligibility is reviewed.</p>
-      <ul>
-        <li><strong>${c}</strong>: Frequency=<strong>${freq}</strong>${seg && seg!=="—" ? ` (segment: ${seg})` : ""}.</li>
-        <li>${det && det !== "—" ? ("Detail: " + det) : "No additional details provided."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "characteristics") {
-    const c = pickRow.Country || "This country";
-    const mb = pillify(pickRow["Market-based"]);
-    const cb = pillify(pickRow["Cost-based"]);
-    const ib = pillify(pickRow["Income-based"]);
-    const ub = pillify(pickRow["Utility-based"]);
-    const rr = pillify(pickRow["Rent ↑ regular"]);
-    const rn = pillify(pickRow["Rent ↑ not regular"]);
-    const pct= (pickRow["Social rent % of market"] || "").trim() || "—";
-    const buy= (pickRow["Sitting tenant right to buy"] || "").trim() || "—";
-    const note= pickRow["Notes"] || "—";
-    html = `
-      <p><strong>Overview.</strong> Pricing logic, rent adjustment, and tenant purchase rights.</p>
-      <ul>
-        <li><strong>${c}</strong>: Market=${mb}, Cost=${cb}, Income=${ib}, Utility=${ub}.</li>
-        <li>Rent increases: Regular=${rr}, Not regular=${rn}; Social rent ≈ ${pct} of market; Right-to-buy: ${buy}.</li>
-        <li>${note !== "—" ? ("Notes: " + note) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else {
-    html = `<p>This page can be summarized when a matrix table is visible.</p>`;
-  }
+  if (!rows || !rows.length) return "<p>目前沒有可見的表格可整理。</p>";
+  const pickRow = rows[0];
+  const html = `
+    <p><strong>概覽：</strong>此為本頁可見表格的快速整理。</p>
+    <ul>
+      ${Object.keys(pickRow).slice(0,6).map(k=>`<li><strong>${escapeHTML(k)}：</strong>${escapeHTML(pickRow[k])}</li>`).join("")}
+    </ul>`;
   return html;
 }
 
@@ -1122,7 +933,6 @@ function renderAIChat(root){
   `;
   root.appendChild(sec);
 
-  // 快速提問
   const tips = [
     "請幫我總結 荷蘭 的社宅定義與重點制度。",
     "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
@@ -1146,7 +956,7 @@ function renderAIChat(root){
     setStatus("思考中…");
 
     try{
-      const data = collectVisibleTableData(); // 若當前頁面不是矩陣，也沒關係
+      const data = collectVisibleTableData();
       const payload = {
         topic:"chat",
         mode:"qa",
@@ -1179,14 +989,18 @@ function renderAIChat(root){
     const log=$("#aiLog");
     const item = document.createElement("div");
     item.className = `ai-msg ${role}`;
-    item.innerHTML = `
-      <div class="who">${role==="user"?"你":"AI"}</div>
-      <div class="bubble">${isHTML?content:escapeHTML(content)}</div>
-    `;
+    if(role==="assistant"){
+      item.innerHTML = `
+        <div class="avatar">🤖</div>
+        <div class="bubble">${isHTML?content:escapeHTML(content)}</div>
+      `;
+    }else{
+      item.innerHTML = `
+        <div class="bubble">${isHTML?content:escapeHTML(content)}</div>
+      `;
+    }
     log.appendChild(item);
     log.scrollTop = log.scrollHeight;
   }
   function setStatus(t){ $("#aiStatus").textContent = t||""; }
 }
-
-/* =================== END =================== */
