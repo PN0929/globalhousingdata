@@ -144,54 +144,61 @@ footer{margin-top:22px;text-align:center;color:var(--muted);font-size:13px}
 .fade-in{animation:fade .24s ease}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
-/* ======= 補：定義頁卡片中的 AI 摘要 ======= */
-.ai-snippet{
-  margin-top:10px;padding:10px 12px;border-radius:10px;
-  background:#f8fafc;border:1px dashed var(--line);color:var(--ink-2);font-size:13.5px
+/* ===== 🤖 AI 對話（含首頁卡片） ===== */
+.ai-card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:16px;box-shadow:var(--shadow-sm);max-width:960px;margin:16px auto
 }
-.ai-snippet em{color:var(--muted)}
-.ai-error{display:inline-block;background:#fff5f5;color:#7f1d1d;border:1px solid #fecaca;border-radius:10px;padding:8px 10px}
+.ai-title{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;margin-bottom:6px}
+.ai-sub{color:var(--ink-2);font-size:13.5px;margin-bottom:12px}
+.ai-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.ai-quick .chip{cursor:pointer}
+.ai-input{display:flex;gap:8px;align-items:flex-start;margin:8px 0}
+.ai-input textarea{
+  flex:1;min-height:106px;border:1.5px solid var(--line);border-radius:12px;padding:12px;font-size:15px;resize:vertical
+}
+.ai-input textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(14,165,165,.12);outline:none}
+.ai-input .btn{height:42px;padding:0 14px}
+.ai-chat-log{
+  background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;max-height:520px;overflow:auto
+}
+.ai-msg{display:flex;gap:10px;margin:10px 0}
+.ai-msg .who{
+  width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#0ea5a5;color:#fff;font-weight:800;flex:none
+}
+.ai-msg.user .who{background:#64748b}
+.ai-msg .bubble{
+  background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;flex:1;font-size:14.5px
+}
+.ai-msg.assistant .bubble{background:#f0f9ff;border-color:#cfe8ff}
+.ai-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
+.ai-actions .status{color:var(--muted);font-size:12px}
 
-/* =============== AI Chat =============== */
-.ai-page{max-width:1000px;margin:20px auto 0}
-.ai-hero{
-  background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-  padding:16px;box-shadow:var(--shadow-sm)
+/* AI Modal（卡片摘要） */
+.ai-modal{
+  position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.18); backdrop-filter: blur(2px); z-index:9999
 }
-.ai-hero h2{font-size:20px;font-weight:800}
-.ai-hero .muted{color:var(--ink-2);margin-top:6px}
+.ai-modal-content{
+  width:min(860px,92vw); background:#fff; border:1px solid var(--line); border-radius:16px;
+  box-shadow:var(--shadow); padding:12px
+}
+.ai-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.ai-modal-body{max-height:70dvh;overflow:auto}
 
-.ai-chat{margin-top:14px}
-.chat-log{
-  background:#fff;border:1px solid var(--line);border-radius:var(--radius);
-  padding:14px;box-shadow:var(--shadow-sm);
-  height:360px;overflow:auto;display:flex;flex-direction:column;gap:10px
+/* ==== AI 回覆的閱讀性優化（AI 對話 與 AI 摘要） ==== */
+.ai-chat-log p,
+#ai-body p {
+  margin: 0 0 10px;
+  line-height: 1.75;
 }
-/* 空紀錄時隱藏 */
-.chat-log:empty { display: none; }
-
-.bubble{max-width:78%;padding:10px 12px;border-radius:12px;box-shadow:var(--shadow-sm);font-size:14.5px}
-.bubble.user{margin-left:auto;background:var(--brand);color:#fff}
-.bubble.assistant{margin-right:auto;background:#fff;border:1px solid var(--line);color:var(--ink)}
-
-.chat-form{display:flex;gap:10px;align-items:flex-start;margin-top:10px}
-.chat-form textarea{
-  flex:1;min-height:130px;resize:vertical;
-  padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:#fff;
-  font-size:15px;line-height:1.6;outline:none
+.ai-chat-log ul,
+#ai-body ul {
+  margin: 0 0 10px;
+  padding-left: 20px;
 }
-.chat-form textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(14,165,165,.12)}
-.chat-form button{padding:12px 16px;font-size:14px;border-radius:12px}
-
-.ai-hint{
-  margin-top:10px;background:#ffffff90;border:1px dashed var(--line);
-  border-radius:12px;padding:12px;color:var(--ink-2)
+.ai-chat-log li,
+#ai-body li {
+  margin: 4px 0;
 }
-.ai-hint .hint-title{font-weight:800;color:var(--ink);margin-bottom:6px}
-.ai-suggest{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
-.suggest-pill{
-  display:inline-block;border:1px solid var(--line);background:#fff;
-  padding:6px 10px;border-radius:999px;font-size:12.5px;color:var(--ink-2);
-  cursor:pointer;transition:.16s
-}
-.suggest-pill:hover{border-color:var(--brand);box-shadow:0 0 0 3px rgba(14,165,165,.12)}
