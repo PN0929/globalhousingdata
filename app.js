@@ -1041,7 +1041,7 @@ function renderAIChat(root){
 
     <!-- 2) 輸入框 -->
     <div class="ai-input">
-      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與再審查差異」"></textarea>
+      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與資格審查差異」"></textarea>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button id="aiSend"   class="btn primary">送出</button>
         <button id="aiHealth" class="btn">測試連線</button>
