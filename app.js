@@ -79,7 +79,7 @@ function renderRoute(){
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else if(hash.startsWith("/priority"))     renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
-  else if(hash.startsWith("/ai"))           renderAiPage(main);  // ← 新增 AI 對話路由
+  else if(hash.startsWith("/ai"))           renderAiPage(main);  // AI 對話路由
   else renderHome(main);
 }
 
@@ -101,7 +101,7 @@ const TOPICS = [
   { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",             available: true,  cta: "查看頻率" },
   { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",           available: true,  cta: "查看條件" },
   { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",         available: true,  cta: "查看特徵" },
-  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "就資料庫問比較、是否存在、差異與國別摘要",           available: true,  cta: "開始對話" }, // ← 新增
+  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "就資料庫問比較、是否存在、差異與國別摘要",           available: true,  cta: "開始對話" },
 ];
 
 function renderHome(root){
@@ -159,8 +159,7 @@ async function renderDefinitions(root){
 
   await loadDefinitions();
   buildDefControls();
-  renderDefCards();
-  // ← 這裡不再插任何「AI 摘要按鈕 / Modal」，改為每張卡片內自動顯示 AI 摘要
+  renderDefCards(); // 不自動生成 AI 摘要，改為點擊後才生成
 }
 
 async function loadDefinitions(){
@@ -231,6 +230,7 @@ function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
   empty.style.display="none";
+
   wrap.innerHTML = DefState.filtered.map((d)=>{
     const chips = TAG_RULES.filter(t=>d.flagsCombined[t.key]).slice(0,3).map(t=>`<span class="chip">${t.label}</span>`).join("");
     const multiple = d.items.length>1;
@@ -239,6 +239,7 @@ function renderDefCards(){
         <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
       </div>`).join("");
+
     return `
       <article class="card ${multiple?"multiple":""}" data-country="${escapeHTML(d.Country)}">
         <div class="card-header">
@@ -247,19 +248,22 @@ function renderDefCards(){
             <div class="terms">${escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"))}</div>
           </div>
         </div>
+
         <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
 
-        <!-- 新增：AI 摘要（國家級） -->
-        <div class="ai-snippet" data-country="${escapeHTML(d.Country)}">
-          <em>AI 摘要生成中…</em>
-        </div>
-
-        <div class="actions">
+        <!-- 按一下才生成 AI 摘要 -->
+        <div class="actions" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+          <button class="btn" data-ai-btn data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
           <button class="btn toggle">展開全文</button>
           ${multiple?`<span class="badge">共 ${d.items.length} 個定義</span>`:""}
           <div class="chips">${chips}</div>
         </div>
+
+        <!-- 生成結果會塞在這裡（預設隱藏） -->
+        <div class="ai-snippet" data-result-for="${escapeHTML(d.Country)}" style="display:none"></div>
+
         <div class="fulltext" style="display:none;">${variants}</div>
+
         <div class="actions" style="margin-top:8px">
           <a class="btn" href="#/eligibility">→ 申請資格</a>
           <a class="btn" href="#/reassessment?country=${countryParam(d.Country)}">→ 再審查頻率</a>
@@ -269,6 +273,7 @@ function renderDefCards(){
       </article>`;
   }).join("");
 
+  // 展開全文切換
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
     if(btn){
@@ -280,50 +285,49 @@ function renderDefCards(){
     }
   };
 
-  // 生成所有卡片的 AI 摘要（懶載：進入視窗才跑）
-  lazyGenerateCountrySnippets();
+  // 綁定「產生 AI 摘要」按鈕（按一下才打 API）
+  attachDefinitionAISnippetHandlers(wrap);
 }
 
-/* === 定義頁：AI 國家摘要（卡片內） ===================== */
-function lazyGenerateCountrySnippets(){
-  const nodes = $$(".ai-snippet[data-country]");
-  if(!nodes.length) return;
+/* === 定義頁：AI 國家摘要（按一下才生成） ===================== */
+function attachDefinitionAISnippetHandlers(scope){
+  scope.querySelectorAll('[data-ai-btn]').forEach((btn)=>{
+    btn.addEventListener('click', async ()=>{
+      const country = btn.getAttribute('data-country');
+      const card = btn.closest('.card');
+      const selector = `[data-result-for="${(country||"").replace(/"/g,'\\"')}"]`;
+      const resultBox = card.querySelector(selector);
 
-  const worker = async (el) => {
-    const country = el.getAttribute("data-country");
-    // 找到該國的完整定義文本（傳給 AI）
-    const record = DefState.data.find(d => d.Country === country);
-    const defs = (record?.items || []).map(x => ({
-      TermsUsed: x.TermsUsed,
-      Definition: x.Definition
-    }));
+      // 找該國定義資料
+      const record = DefState.data.find(d => d.Country === country);
+      const defs = (record?.items || []).map(x => ({
+        TermsUsed: x.TermsUsed,
+        Definition: x.Definition
+      }));
 
-    try{
-      const html = await summarizeCountryDefinition(country, defs);
-      el.innerHTML = html;
-    }catch(err){
-      el.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。<br>${escapeHTML(localCountryDefinitionFallback(country, defs))}</span>`;
-    }
-  };
+      // UI 狀態：loading
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "產生中…";
+      resultBox.style.display = "block";
+      resultBox.innerHTML = `<em>AI 摘要生成中，可能需要數秒…</em>`;
 
-  // 使用 IntersectionObserver 懶載，避免一次打爆 API
-  const io = new IntersectionObserver((entries)=>{
-    entries.forEach(e=>{
-      if(e.isIntersecting){
-        io.unobserve(e.target);
-        worker(e.target);
+      try{
+        const html = await summarizeCountryDefinition(country, defs);
+        resultBox.innerHTML = html || `<span class="ai-error">未取得有效內容。</span>`;
+      }catch(err){
+        resultBox.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。<br>${escapeHTML(localCountryDefinitionFallback(country, defs))}</span>`;
+      }finally{
+        btn.disabled = false;
+        btn.textContent = originalText;
       }
     });
-  }, { rootMargin: "200px 0px" });
-
-  nodes.forEach(n => io.observe(n));
+  });
 }
 
 async function summarizeCountryDefinition(country, defs){
-  // 如果關閉真 AI，直接回傳本地規則摘要
   if(!ENABLE_AI || !AI_API_BASE) return localCountryDefinitionFallback(country, defs);
 
-  // 嘗試呼叫你的 Worker（/api/report）
   const payload = {
     topic: "definitions",
     mode: "country",
@@ -342,7 +346,6 @@ async function summarizeCountryDefinition(country, defs){
   const json = await res.json();
   if(json?.ok && json?.html) return json.html;
 
-  // 若回傳非預期，退回本地規則
   return localCountryDefinitionFallback(country, defs);
 }
 
@@ -392,7 +395,6 @@ async function renderEligibility(root){
   await loadEligibility();
   bindEligibilityControls();
   renderEligibilityView();
-  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadEligibility(){
@@ -548,7 +550,6 @@ async function renderReassessment(root, params={}){
   await loadReassessment();
   bindReassessmentControls();
   renderReassessmentTable();
-  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadReassessment(){
@@ -662,7 +663,6 @@ async function renderPriority(root, params={}){
   await loadPriority();
   bindPriorityControls();
   renderPriorityTable();
-  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadPriority(){
@@ -834,7 +834,6 @@ async function renderCharacteristics(root, params={}){
   }
 
   renderCharacteristicsTable();
-  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadCharacteristics(){
@@ -979,26 +978,51 @@ function pill(v){
 }
 
 /* ============================================================
-   AI 對話頁（#/ai）
+   AI 對話頁（#/ai）— 大輸入框 + 真實國名提示 + 可點示例
    ============================================================ */
 async function renderAiPage(container) {
+  const COUNTRIES = ["台灣","日本","韓國","德國","法國","荷蘭","英國","瑞典","加拿大","澳洲","紐西蘭","美國","義大利","西班牙","挪威","丹麥","芬蘭"];
+
+  const EXAMPLES = [
+    `請幫我總結 ${COUNTRIES[5]} 的社宅定義與重點制度。`,
+    `${COUNTRIES[1]} 與 ${COUNTRIES[3]} 在「優先分配」是否都有針對長者？`,
+    `哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。`,
+    `${COUNTRIES[0]} 和 ${COUNTRIES[2]} 的申請資格差異為何？請用表格列點。`,
+  ];
+
   container.innerHTML = `
     <section class="ai-page">
       <div class="ai-hero">
         <h2>🤖 AI 對話</h2>
-        <p class="muted">詢問關於本資料庫的開放式問題：比較、是否存在、摘要與差異等。</p>
+        <p class="muted">這裡可以詢問關於本資料庫的開放式問題：機制比較、各國摘要與差異等。由AI機器人替您摘錄數據庫重點回覆。</p>
       </div>
 
       <div class="ai-chat" id="aiChat">
+        <div class="ai-hint">
+          <div class="hint-title">快速提問（點一下即可帶入輸入框）</div>
+          <div class="ai-suggest" id="aiSuggest"></div>
+        </div>
+
         <div class="chat-log" id="chatLog" aria-live="polite"></div>
+
         <form id="chatForm" class="chat-form">
-          <input id="chatInput" type="text" placeholder="例如：兒少優先分配哪個國家設計較完整？" autocomplete="off" />
-          <button type="submit">送出</button>
+          <textarea id="chatInput" placeholder="輸入你的問題，例如：\n- ${EXAMPLES[0]}\n- ${EXAMPLES[1]}"></textarea>
+          <button type="submit" class="btn primary">送出</button>
         </form>
-        <p class="tiny muted">提示：可問「X 項目哪個國家比較好？」、「A 與 B 是否都有 Y？」或「總結 C 國」。</p>
       </div>
     </section>
   `;
+
+  const suggest = container.querySelector('#aiSuggest');
+  suggest.innerHTML = EXAMPLES.map(q => `<span class="suggest-pill" data-q="${escapeHTML(q)}">${escapeHTML(q)}</span>`).join("");
+  suggest.addEventListener('click', (e) => {
+    const pill = e.target.closest('.suggest-pill');
+    if (!pill) return;
+    const q = pill.getAttribute('data-q');
+    const ta = container.querySelector('#chatInput');
+    ta.value = q;
+    ta.focus();
+  });
 
   const chatLog = container.querySelector('#chatLog');
   const form = container.querySelector('#chatForm');
@@ -1015,7 +1039,6 @@ async function renderAiPage(container) {
 
     try {
       const answer = await aiQuery(q, {
-        // 提供 CSV 來源給後端（若後端需要自行擷取/聚合）
         sources: {
           definitions: CSV_DEFINITIONS,
           eligibility: CSV_ELIGIBILITY,
@@ -1045,11 +1068,9 @@ function appendChatBubble(root, role, text) {
 
 async function aiQuery(question, context) {
   if (!ENABLE_AI || !AI_API_BASE) {
-    // 開發模式：簡單 Mock
     return mockAnswer(question);
   }
 
-  // 優先嘗試 /api/chat；失敗再試 /api/report（兼容你的 Worker）
   try {
     const res = await fetch(`${AI_API_BASE}/api/chat`, {
       method: "POST",
@@ -1062,7 +1083,6 @@ async function aiQuery(question, context) {
     }
   } catch(_) {}
 
-  // 退回 /api/report（mode: chat）
   const res2 = await fetch(`${AI_API_BASE}/api/report`, {
     method: "POST",
     headers: { "Content-Type":"application/json" },
@@ -1087,13 +1107,3 @@ function mockAnswer(q){
   if(lq.includes("總結") || lq.includes("摘要")) return "示例：C 國社宅聚焦於弱勢戶優先、租金管制與再審查，每 X 年檢核一次（開發中）。";
   return "我可以幫你比較項目、檢查是否存在，或總結特定國家；請再換個說法試試！";
 }
-
-/* ======= （移除）舊的 AI Modal / 按鈕 / 頁面摘要機制 =========
-   - ensureAIModal()
-   - collectVisibleTableData()
-   - computeYesShare()
-   - localSummarize()
-   - injectAISummaryButton()
-   - ensureAIButtonAfterRoute()
-   以上全部已刪除，以符合「四頁移除 AI 摘要、定義頁改為卡片內摘要、AI 另設對話頁」的需求。
-   ============================================================ */
