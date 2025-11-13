@@ -1034,9 +1034,8 @@ function renderAIChat(root){
     <div class="ai-quick" id="aiQuickRow">
       ${[
         "請幫我總結 荷蘭 的社宅定義與重點制度。",
-        "日本 與 德國 在「優先分配」是否都有針對長者？",
-        "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
-        "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+        "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
+        "日本 和 韓國 的申請資格差異為何？請用表格列點。"
       ].map(q=>`<button class="chip" data-q="${escapeHTML(q)}">${escapeHTML(q)}</button>`).join("")}
     </div>
 
