@@ -15,10 +15,9 @@ const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
 function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
 function countryParam(name){ return encodeURIComponent(String(name||"").replace(/\s+/g," ").trim()); }
-function cleanCountryName(s){
-  const t = String(s || "").trim();
-  return t.replace(/\s*\(\s*\d+(?:\.\d+)?\s*\)\s*$/,'').replace(/\s*[-–—]\s*\d+(?:\.\d+)?\s*$/,'').replace(/\s+\d+(?:\.\d+)?\s*$/,'').trim();
-}
+// 🔧 Hotfix: 暫時不要清除國名（避免連動渲染壞掉）
+function cleanCountryName(s){ return String(s || "").trim(); }
+
 function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
 function idxByAliases(headers, aliases){
   const keys = headers.map(h => normKey(h));
@@ -317,6 +316,7 @@ async function generateCardAISummary(cardEl, country){
 
 /* =================== 申請資格 =================== */
 const EliState = { raw:[], view:"matrix", search:"" };
+
 async function renderEligibility(root){
   const sec=document.createElement("section"); sec.id="eligibility";
   sec.innerHTML = `
@@ -350,16 +350,22 @@ async function renderEligibility(root){
     <div id="eli_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
   root.appendChild(sec);
-  await loadEligibility(); bindEligibilityControls(); renderEligibilityView();
+
+  await loadEligibility();
+  bindEligibilityControls();
+  renderEligibilityView();
 }
+
 async function loadEligibility(){
   let text=""; 
   try{
     const resp = await fetch(CSV_ELIGIBILITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_ELIGIBILITY failed:", err); EliState.raw=[]; return; }
+
   const rows = csvParse(text); if(!rows.length){ EliState.raw=[]; return; }
   const h = rows[0];
+
   const col = {
     Country: idxByAliases(h, ["country"]),
     CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
@@ -370,13 +376,24 @@ async function loadEligibility(){
     Emp: idxByAliases(h, ["employment"]),
     Note:idxByAliases(h, ["othernotes","notes","note"])
   };
+
   EliState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c  = get(col.Country);
     if(!c) return null;
-    return { c, cn: get(col.CountryNormalized) || c, All: get(col.All,"NA"), Inc: get(col.Inc,"NA"), PR:  get(col.PR,"NA"), Res: get(col.Res,"NA"), Emp: get(col.Emp,"NA"), Note:get(col.Note,"") };
+    return {
+      c,
+      cn: get(col.CountryNormalized) || c,
+      All: get(col.All,"NA"),
+      Inc: get(col.Inc,"NA"),
+      PR:  get(col.PR,"NA"),
+      Res: get(col.Res,"NA"),
+      Emp: get(col.Emp,"NA"),
+      Note:get(col.Note,"")
+    };
   }).filter(Boolean);
 }
+
 function bindEligibilityControls(){
   $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
   $("#eli_sort").addEventListener("change",renderEligibilityView);
@@ -386,6 +403,7 @@ function bindEligibilityControls(){
     const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search=""; EliState.quick={key:k,val:v}; renderEligibilityView();
   });
 }
+
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
@@ -401,6 +419,7 @@ function filterEligibility(data){
     return true;
   });
 }
+
 function sortEligibility(arr){
   const how=$("#eli_sort").value;
   if(how==="score"){
@@ -408,6 +427,7 @@ function sortEligibility(arr){
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderEligibilityView(){
   const mount=$("#eli_mount"), empty=$("#eli_empty");
   let data = filterEligibility(EliState.raw.slice()); sortEligibility(data);
@@ -423,7 +443,7 @@ function renderEligibilityView(){
         <tbody>
           ${data.map(d=>`
             <tr>
-              <td class="flag"><strong>${escapeHTML(cleanCountryName(d.c))}</strong></td>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
               <td>${pill(d.All)}</td><td>${pill(d.Inc)}</td><td>${pill(d.PR)}</td><td>${pill(d.Res)}</td><td>${pill(d.Emp)}</td>
               <td class="note">${escapeHTML(d.Note||"")}</td>
             </tr>`).join("")}
@@ -440,7 +460,7 @@ function renderEligibilityView(){
     <div class="cards">
       ${data.map(d=>`
         <article class="card">
-          <div class="card-header"><div class="country">${escapeHTML(cleanCountryName(d.c))}</div></div>
+          <div class="card-header"><div class="country">${escapeHTML(d.c)}</div></div>
           <div class="summary">
             <span class="chip">All: ${pill(d.All)}</span>
             <span class="chip">Income: ${pill(d.Inc)}</span>
@@ -461,6 +481,7 @@ function renderEligibilityView(){
 
 /* =================== 再審查頻率 =================== */
 const ReaState = { raw:[], search:"", sort:"az", preselectCountry:null };
+
 async function renderReassessment(root, params={}){
   ReaState.preselectCountry = params.country || null;
   const sec=document.createElement("section"); sec.id="reassessment";
@@ -484,8 +505,12 @@ async function renderReassessment(root, params={}){
     <div id="rea_mount" class="fade-in"></div>
     <div id="rea_empty" class="empty" style="display:none;">沒有符合條件的國家</div>`;
   root.appendChild(sec);
-  await loadReassessment(); bindReassessmentControls(); renderReassessmentTable();
+
+  await loadReassessment();
+  bindReassessmentControls();
+  renderReassessmentTable();
 }
+
 async function loadReassessment(){
   let text="";
   try{
@@ -509,14 +534,17 @@ async function loadReassessment(){
   }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
+
 function bindReassessmentControls(){
   $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
   $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
 }
+
 function filterReassessment(d){
   const q=ReaState.search; if(!q) return d;
   return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].map(normSearch).join(" | ").includes(normSearch(q)));
 }
+
 function sortReassessment(arr){
   if(ReaState.sort==="freq"){
     const order=["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
@@ -524,6 +552,7 @@ function sortReassessment(arr){
     arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderReassessmentTable(){
   const mount=$("#rea_mount"), empty=$("#rea_empty");
   let data = filterReassessment(ReaState.raw.slice()); sortReassessment(data);
@@ -536,7 +565,7 @@ function renderReassessmentTable(){
         <tbody>
           ${data.map(d=>`
             <tr>
-              <td class="flag"><strong>${escapeHTML(cleanCountryName(d.c))}</strong></td>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
               <td>${escapeHTML(d.seg||"—")}</td>
               <td>${escapeHTML(d.freq||"—")}</td>
               <td class="note">${escapeHTML(d.detail||"")}</td>
@@ -554,14 +583,17 @@ function renderReassessmentTable(){
 
 /* =================== 優先分配 =================== */
 const PriState = { raw:[], search:"", quick:null, sort:"az", preselectCountry:null };
+
 async function renderPriority(root, params={}){
   PriState.preselectCountry = params.country || null;
+
   const sec=document.createElement("section"); sec.id="priority";
   sec.innerHTML = `
     <div class="home-hero" style="margin-top:20px;">
       <h2>優先分配條件（Priority allocation）</h2>
       <p class="note">比較各國對等待名單、收入、身心障礙、長者、庇護申請者、族群、家戶組成與現住房況等優先規則。</p>
     </div>
+
     <div class="controls fade-in">
       <div class="searchbox"><input id="pri_search" type="text" placeholder="搜尋國家或敘述…" /></div>
       <div class="selectbox">
@@ -581,6 +613,7 @@ async function renderPriority(root, params={}){
         <a class="btn" href="#/characteristics">→ 社宅特徵</a>
       </div>
     </div>
+
     <div id="pri_mount" class="fade-in"></div>
     <div id="pri_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
@@ -590,12 +623,14 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
+
 async function loadPriority(){
   let text="";
   try{
     const resp = await fetch(CSV_PRIORITY,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_PRIORITY failed:", err); PriState.raw=[]; return; }
+
   const rows = csvParse(text); if(!rows.length){ PriState.raw=[]; return; }
   const h = rows[0];
   const col = {
@@ -611,13 +646,27 @@ async function loadPriority(){
     Cond: idxByAliases(h, ["currenthousingconditions","housingconditions","currenthousing"]),
     Note: idxByAliases(h, ["othernotes","notes","note"])
   };
+
   PriState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c=get(col.Country); if(!c) return null;
-    return { c, cn:get(col.CountryNormalized)||c, Wait:get(col.Wait,"NA"), Income:get(col.Income,"NA"), Dis:get(col.Dis,"NA"), Eld:get(col.Eld,"NA"), Asy:get(col.Asy,"NA"), Eth:get(col.Eth,"NA"), HH:get(col.HH,"NA"), Cond:get(col.Cond,"NA"), Note:get(col.Note,"") };
+    return {
+      c,
+      cn:get(col.CountryNormalized)||c,
+      Wait:get(col.Wait,"NA"),
+      Income:get(col.Income,"NA"),
+      Dis:get(col.Dis,"NA"),
+      Eld:get(col.Eld,"NA"),
+      Asy:get(col.Asy,"NA"),
+      Eth:get(col.Eth,"NA"),
+      HH:get(col.HH,"NA"),
+      Cond:get(col.Cond,"NA"),
+      Note:get(col.Note,"")
+    };
   }).filter(Boolean);
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
+
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -626,6 +675,7 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
+
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
@@ -641,17 +691,20 @@ function filterPriority(data){
     return true;
   });
 }
+
 function sortPriority(arr){
   if(PriState.sort==="score"){
     const score=d=>["Wait","Income","Dis","Eld","Asy","Eth","HH","Cond"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderPriorityTable(){
   const mount=$("#pri_mount"), empty=$("#pri_empty");
   let data = filterPriority(PriState.raw.slice()); sortPriority(data);
   if(!data.length){ mount.innerHTML=""; empty.style.display="block"; empty.textContent="沒有符合條件的國家（可能是 CSV 欄位名稱不一致或檔案路徑有誤）"; return; }
   empty.style.display="none";
+
   mount.innerHTML = `
     <div class="matrix">
       <table class="table">
@@ -672,7 +725,7 @@ function renderPriorityTable(){
         <tbody>
           ${data.map(d=>`
             <tr>
-              <td class="flag"><strong>${escapeHTML(cleanCountryName(d.c))}</strong></td>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
               <td>${pill(d.Wait)}</td>
               <td>${pill(d.Income)}</td>
               <td>${pill(d.Dis)}</td>
@@ -698,14 +751,17 @@ function renderPriorityTable(){
 
 /* =================== 社宅特徵 =================== */
 const ChaState = { raw:[], search:"", sort:"az", preselectCountry:null };
+
 async function renderCharacteristics(root, params={}){
   ChaState.preselectCountry = params.country || null;
+
   const sec=document.createElement("section"); sec.id="characteristics";
   sec.innerHTML = `
     <div class="home-hero" style="margin-top:20px;">
       <h2>社宅特徵（Characteristics of social rental housing）</h2>
       <p class="note">定價方式（市場/成本/所得/效用）、租金調整（定期/不定期）、社宅租金占市場租金％、承租戶購屋權（含註記）。</p>
     </div>
+
     <div class="controls fade-in">
       <div class="searchbox"><input id="cha_search" type="text" placeholder="搜尋國家、關鍵字…" /></div>
       <div class="selectbox">
@@ -721,23 +777,34 @@ async function renderCharacteristics(root, params={}){
         <a class="btn" href="#/reassessment">→ 再審查頻率</a>
       </div>
     </div>
+
     <div id="cha_notice" class="empty" style="display:none;"></div>
     <div id="cha_mount" class="fade-in"></div>
     <div id="cha_empty" class="empty" style="display:none;">沒有符合條件的國家</div>
   `;
   root.appendChild(sec);
-  await loadCharacteristics(); bindCharacteristicsControls();
-  if(ChaState.preselectCountry){ const ip=$("#cha_search"); if(ip) ip.value=ChaState.preselectCountry; ChaState.search=ChaState.preselectCountry; }
+
+  await loadCharacteristics();
+  bindCharacteristicsControls();
+
+  if(ChaState.preselectCountry){
+    const ip = $("#cha_search"); if(ip) ip.value = ChaState.preselectCountry;
+    ChaState.search = ChaState.preselectCountry;
+  }
+
   renderCharacteristicsTable();
 }
+
 async function loadCharacteristics(){
   let text="";
   try{
     const resp = await fetch(CSV_CHARACTERISTICS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
   }catch(err){ console.error("Fetch CSV_CHARACTERISTICS failed:", err); ChaState.raw=[]; return; }
+
   const rows = csvParse(text); if(!rows.length){ ChaState.raw=[]; return; }
   const h = rows[0];
+
   const col = {
     Country: idxByAliases(h, ["country"]),
     CountryNormalized: idxByAliases(h, ["countrynormalized","countryclean","countrynorm"]),
@@ -751,16 +818,31 @@ async function loadCharacteristics(){
     Buy: idxByAliases(h, ["sittingtenantrighttobuynorm","righttobuynorm","righttobuy"]),
     BuyNote: idxByAliases(h, ["sittingtenantrighttobuynotes","righttobuynotes","notes","othernotes"])
   };
+
   ChaState.raw = rows.slice(1).map(r=>{
     const get=(i,def="")=>(i>=0&&r[i]!=null)?String(r[i]).trim():def;
     const c=get(col.Country); if(!c) return null;
-    return { c, cn:get(col.CountryNormalized)||c, MB:get(col.MB,"NA"), CB:get(col.CB,"NA"), IB:get(col.IB,"NA"), UB:get(col.UB,"NA"), IncReg:get(col.IncReg,"NA"), IncNot:get(col.IncNot,"NA"), Pct:get(col.Pct,""), Buy:get(col.Buy,"NA"), BuyNote:get(col.BuyNote,"") };
+    return {
+      c,
+      cn:get(col.CountryNormalized)||c,
+      MB:get(col.MB,"NA"),
+      CB:get(col.CB,"NA"),
+      IB:get(col.IB,"NA"),
+      UB:get(col.UB,"NA"),
+      IncReg:get(col.IncReg,"NA"),
+      IncNot:get(col.IncNot,"NA"),
+      Pct:get(col.Pct,""),
+      Buy:get(col.Buy,"NA"),
+      BuyNote:get(col.BuyNote,"")
+    };
   }).filter(Boolean);
 }
+
 function bindCharacteristicsControls(){
   $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
+
 function filterCharacteristics(data){
   const qRaw = ChaState.search;
   if(!qRaw) return data;
@@ -770,14 +852,16 @@ function filterCharacteristics(data){
     return hay.includes(q);
   });
 }
+
 function sortCharacteristics(arr){
   if(ChaState.sort==="score"){
     const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderCharacteristicsTable(){
-  const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice");
+  const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice"]);
   let data = filterCharacteristics(ChaState.raw.slice());
   sortCharacteristics(data);
 
@@ -820,7 +904,7 @@ function renderCharacteristicsTable(){
         <tbody>
           ${data.map(d=>`
             <tr>
-              <td class="flag"><strong>${escapeHTML(cleanCountryName(d.c))}</strong></td>
+              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
               <td>${pill(d.MB)}</td>
               <td>${pill(d.CB)}</td>
               <td>${pill(d.IB)}</td>
@@ -912,6 +996,90 @@ function localSummarize(topic, data) {
 }
 
 /* =================== 🤖 AI 對話頁 =================== */
+let CHAT_DATA = null; // {definitions:[], eligibility:[], reassessment:[], priority:[], characteristics:[]}
+
+async function loadAllDatasetsForChat(){
+  if (CHAT_DATA) return CHAT_DATA;
+
+  // 1) 定義
+  const defTxt = await (await fetch(CSV_DEFINITIONS,{cache:"no-store"})).text();
+  const defRows = csvParse(defTxt); const dh = defRows[0]||[];
+  const diC = idxByAliases(dh, ["country"]);
+  const diT = idxByAliases(dh, ["termsused","term(s)used","terms"]);
+  const diD = idxByAliases(dh, ["definition","definitionandsummaryoverview","definitionoverview"]);
+  const definitions = defRows.slice(1).map(r=>{
+    const Country=(r[diC]||"").trim(), Terms=(diT>=0?(r[diT]||""):"").trim(), Definition=(diD>=0?(r[diD]||""):"").trim();
+    if(!Country||!Definition) return null;
+    return { country:Country, terms:Terms, definition:Definition };
+  }).filter(Boolean);
+
+  // 2) 申請資格
+  const eliTxt = await (await fetch(CSV_ELIGIBILITY,{cache:"no-store"})).text();
+  const eliRows = csvParse(eliTxt); const eh=eliRows[0]||[];
+  const ec = idxByAliases(eh,["country"]);
+  const eAll = idxByAliases(eh,["alleligible","allareeligible","all"]);
+  const eInc = idxByAliases(eh,["incomethreshold","income"]);
+  const ePR  = idxByAliases(eh,["citizenshiporpr","citizenshippermresidency","citizenship","permresidency"]);
+  const eRes = idxByAliases(eh,["localresidency","residency","local"]);
+  const eEmp = idxByAliases(eh,["employment"]);
+  const eNote= idxByAliases(eh,["othernotes","notes","note"]);
+  const eligibility = eliRows.slice(1).map(r=>{
+    const c=(r[ec]||"").trim(); if(!c) return null;
+    return { country:c, all:(r[eAll]||"").trim(), income:(r[eInc]||"").trim(), pr:(r[ePR]||"").trim(), residency:(r[eRes]||"").trim(), employment:(r[eEmp]||"").trim(), note:(r[eNote]||"").trim() };
+  }).filter(Boolean);
+
+  // 3) 再審查
+  const reaTxt = await (await fetch(CSV_REASSESSMENT,{cache:"no-store"})).text();
+  const reaRows = csvParse(reaTxt); const rh=reaRows[0]||[];
+  const rc = idxByAliases(rh,["country"]);
+  const rseg= idxByAliases(rh,["segment","scheme","program"]);
+  const rfr = idxByAliases(rh,["standardizedfrequency","frequency","freq","reassessmentfrequency"]);
+  const rdet= idxByAliases(rh,["detail","notes","othernotes","remark","remarks"]);
+  const reassessment = reaRows.slice(1).map(r=>{
+    const c=(r[rc]||"").trim(); if(!c) return null;
+    return { country:c, segment:(r[rseg]||"").trim(), frequency:(r[rfr]||"").trim(), detail:(r[rdet]||"").trim() };
+  }).filter(Boolean);
+
+  // 4) 優先分配
+  const priTxt = await (await fetch(CSV_PRIORITY,{cache:"no-store"})).text();
+  const priRows = csvParse(priTxt); const ph=priRows[0]||[];
+  const pc = idxByAliases(ph,["country"]);
+  const pWait=idxByAliases(ph,["timeonwaitinglist","waitinglist","wait"]);
+  const pInc =idxByAliases(ph,["incomelevel","income"]);
+  const pDis =idxByAliases(ph,["disability","disabled"]);
+  const pEld =idxByAliases(ph,["elderly","older","senior"]);
+  const pAsy =idxByAliases(ph,["asylumseekers","asylum"]);
+  const pEth =idxByAliases(ph,["ethnicorracialminority","ethnicminority","racialminority","minority"]);
+  const pHH  =idxByAliases(ph,["householdcompositionorsize","householdsize","householdcomposition"]);
+  const pCond=idxByAliases(ph,["currenthousingconditions","housingconditions","currenthousing"]);
+  const pNote=idxByAliases(ph,["othernotes","notes","note"]);
+  const priority = priRows.slice(1).map(r=>{
+    const c=(r[pc]||"").trim(); if(!c) return null;
+    return { country:c, waiting:(r[pWait]||"").trim(), income:(r[pInc]||"").trim(), disability:(r[pDis]||"").trim(), elderly:(r[pEld]||"").trim(), asylum:(r[pAsy]||"").trim(), ethnic:(r[pEth]||"").trim(), hhsize:(r[pHH]||"").trim(), condition:(r[pCond]||"").trim(), note:(r[pNote]||"").trim() };
+  }).filter(Boolean);
+
+  // 5) 特徵
+  const chaTxt = await (await fetch(CSV_CHARACTERISTICS,{cache:"no-store"})).text();
+  const chaRows = csvParse(chaTxt); const ch=chaRows[0]||[];
+  const cc=idxByAliases(ch,["country"]);
+  const cMB=idxByAliases(ch,["rentsettingmarketbased","marketbased"]);
+  const cCB=idxByAliases(ch,["rentsettingcostbased","costbased"]);
+  const cIB=idxByAliases(ch,["rentsettingincomebased","incomebased"]);
+  const cUB=idxByAliases(ch,["rentsettingutilitybased","utilitybased"]);
+  const cReg=idxByAliases(ch,["rentincreaseregular","rentincreasereg"]);
+  const cNot=idxByAliases(ch,["rentincreasenotregular","rentincreasenonregular","notregular"]);
+  const cPct=idxByAliases(ch,["socialrentpctofmarket","socialrentpercentagemarket","socialrentshareofmarket","pct"]);
+  const cBuy=idxByAliases(ch,["sittingtenantrighttobuynorm","righttobuynorm","righttobuy"]);
+  const cNote=idxByAliases(ch,["sittingtenantrighttobuynotes","righttobuynotes","notes","othernotes"]);
+  const characteristics = chaRows.slice(1).map(r=>{
+    const c=(r[cc]||"").trim(); if(!c) return null;
+    return { country:c, market:(r[cMB]||"").trim(), cost:(r[cCB]||"").trim(), income:(r[cIB]||"").trim(), utility:(r[cUB]||"").trim(), incReg:(r[cReg]||"").trim(), incNot:(r[cNot]||"").trim(), pct:(r[cPct]||"").trim(), buy:(r[cBuy]||"").trim(), note:(r[cNote]||"").trim() };
+  }).filter(Boolean);
+
+  CHAT_DATA = { definitions, eligibility, reassessment, priority, characteristics };
+  return CHAT_DATA;
+}
+
 function renderAIChat(root){
   const sec = document.createElement("section");
   sec.id = "ai";
@@ -945,6 +1113,9 @@ function renderAIChat(root){
     $("#aiQ").focus();
   });
 
+  // 預先載整庫（只載一次）
+  loadAllDatasetsForChat().catch(()=>{});
+
   $("#aiSend").addEventListener("click", ()=> aiAsk());
   $("#aiQ").addEventListener("keydown",(e)=>{ if(e.key==="Enter" && (e.ctrlKey||e.metaKey)) aiAsk(); });
 
@@ -956,13 +1127,14 @@ function renderAIChat(root){
     setStatus("思考中…");
 
     try{
-      const data = collectVisibleTableData();
+      const datasets = await loadAllDatasetsForChat();
+
       const payload = {
         topic:"chat",
         mode:"qa",
         language:"zh",
         question:q,
-        data: { ...data, stats: computeYesShare(data) }
+        data: { datasets }
       };
 
       let html = "";
@@ -989,18 +1161,42 @@ function renderAIChat(root){
     const log=$("#aiLog");
     const item = document.createElement("div");
     item.className = `ai-msg ${role}`;
-    if(role==="assistant"){
-      item.innerHTML = `
-        <div class="avatar">🤖</div>
-        <div class="bubble">${isHTML?content:escapeHTML(content)}</div>
-      `;
-    }else{
-      item.innerHTML = `
-        <div class="bubble">${isHTML?content:escapeHTML(content)}</div>
-      `;
-    }
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = role==="assistant" ? "AI" : "You";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    if(isHTML) bubble.innerHTML = content;
+    else bubble.textContent = content;
+    item.appendChild(avatar);
+    item.appendChild(bubble);
     log.appendChild(item);
     log.scrollTop = log.scrollHeight;
   }
-  function setStatus(t){ $("#aiStatus").textContent = t||""; }
+  function setStatus(t){ const s=$("#aiStatus"); if(s) s.textContent = t||""; }
 }
+
+/* ====== AI 對話頁面樣式所需的最低限度容器 class（若已寫在 CSS 可忽略） ====== */
+/* 這段不影響功能，僅確保沒更新 styles.css 時也有基本版面 */
+(function injectBasicAICSS(){
+  if (document.getElementById("ai-inline-style")) return;
+  const css = document.createElement("style");
+  css.id="ai-inline-style";
+  css.textContent = `
+  .ai-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 6px 18px rgba(2,132,199,.10);padding:14px}
+  .ai-title{font-weight:800;font-size:18px}
+  .ai-sub{color:#334155;font-size:13px;margin:6px 0 10px}
+  .ai-quick{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .ai-input{display:flex;gap:8px;align-items:flex-start}
+  .ai-input textarea{flex:1;min-height:110px;padding:10px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px}
+  .ai-chat-log{margin-top:12px;max-height:60vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
+  .ai-msg{display:flex;gap:8px}
+  .ai-msg.user{justify-content:flex-end}
+  .ai-msg .avatar{flex:0 0 auto;width:28px;height:28px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .ai-msg.user .avatar{background:#3b82f6;color:#fff}
+  .ai-msg .bubble{max-width:min(720px,80%);padding:10px 12px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0}
+  .ai-msg.user .bubble{background:#dbeafe;border-color:#bfdbfe}
+  .chip{background:#ecfeff;border:1px solid rgba(14,165,165,.35);color:#0b8d8d;font-weight:600;border-radius:999px;padding:4px 8px;font-size:12px;cursor:pointer}
+  `;
+  document.head.appendChild(css);
+})();
