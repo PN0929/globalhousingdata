@@ -336,16 +336,8 @@ async function summarizeCountryDefinition(country, defs){
     context: { definitions: defs }
   };
 
-  const res = await fetch(`${AI_API_BASE}/api/report`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
+  const json = await apiFetch("/api/report", payload);
   if(json?.ok && json?.html) return json.html;
-
   return localCountryDefinitionFallback(country, defs);
 }
 
@@ -1002,6 +994,10 @@ async function renderAiPage(container) {
         <div class="ai-hint">
           <div class="hint-title">快速提問（點一下即可帶入輸入框）</div>
           <div class="ai-suggest" id="aiSuggest"></div>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+            <button id="aiHealthBtn" class="btn">測試連線</button>
+            <span id="aiHealthMsg" class="note"></span>
+          </div>
         </div>
 
         <!-- 2) 輸入框（送出後才會顯示下方聊天紀錄） -->
@@ -1014,7 +1010,7 @@ async function renderAiPage(container) {
         <div class="chat-log" id="chatLog" aria-live="polite"></div>
       </div>
     </section>
-  `;
+  ";
 
   // 渲染可點示例
   const suggest = container.querySelector('#aiSuggest');
@@ -1026,6 +1022,22 @@ async function renderAiPage(container) {
     const ta = container.querySelector('#chatInput');
     ta.value = q;
     ta.focus();
+  });
+
+  // 健康檢查
+  const healthBtn = container.querySelector('#aiHealthBtn');
+  const healthMsg = container.querySelector('#aiHealthMsg');
+  healthBtn.addEventListener('click', async () => {
+    healthBtn.disabled = true;
+    healthMsg.textContent = "檢查中…";
+    try {
+      const msg = await healthCheckAI();
+      healthMsg.textContent = msg;
+    } catch (e) {
+      healthMsg.textContent = `錯誤：${e.message}`;
+    } finally {
+      healthBtn.disabled = false;
+    }
   });
 
   const chatLog = container.querySelector('#chatLog');
@@ -1053,8 +1065,14 @@ async function renderAiPage(container) {
       });
       appendChatBubble(chatLog, 'assistant', answer || '（沒有取得回覆，請稍後再試）');
     } catch (err) {
-      console.error(err);
-      appendChatBubble(chatLog, 'assistant', '抱歉，回覆失敗了。');
+      const hint = [
+        "可能原因：",
+        "1) Cloudflare Worker CORS 未開（需回傳 Access-Control-Allow-Origin: *、Allow-Headers: Content-Type、Allow-Methods: POST, GET）。",
+        "2) API 路徑或 payload 不符（/api/chat 或 /api/report）。",
+        "3) Worker 錯誤或逾時。"
+      ].join("\n");
+      appendChatBubble(chatLog, 'assistant', `抱歉，回覆失敗。\n${err.message}\n\n${hint}`);
+      console.error("[AI Chat Error]", err);
     } finally {
       input.disabled = false;
       input.focus();
@@ -1070,32 +1088,75 @@ function appendChatBubble(root, role, text) {
   root.scrollTop = root.scrollHeight;
 }
 
+/* ------------------- 更可靠的 fetch 包裝 + 健檢 ------------------- */
+async function apiFetch(path, payload, {timeoutMs = 20000} = {}) {
+  const url = `${AI_API_BASE.replace(/\/$/, "")}${path}`;
+  const controller = new AbortController();
+  const to = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      mode: "cors",
+      body: JSON.stringify(payload || {}),
+      signal: controller.signal
+    });
+
+    const text = await res.text(); // 先拿原文，方便除錯
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch (e) {}
+
+    if (!res.ok) {
+      const detail = json?.error || json?.message || text || `HTTP ${res.status}`;
+      throw new Error(`HTTP ${res.status} ${res.statusText} - ${detail}`);
+    }
+    if (!json) throw new Error("空的回應（非 JSON）");
+
+    return json;
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("連線逾時（timeout）");
+    throw err;
+  } finally {
+    clearTimeout(to);
+  }
+}
+
 async function aiQuery(question, context) {
   if (!ENABLE_AI || !AI_API_BASE) {
     return mockAnswer(question);
   }
 
+  // 先試 /api/chat
   try {
-    const res = await fetch(`${AI_API_BASE}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type":"application/json" },
-      body: JSON.stringify({ question, context, language: "zh-TW" })
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json?.ok && json?.answer) return json.answer;
+    const json = await apiFetch("/api/chat", { question, context, language: "zh-TW" });
+    if (json?.ok && (json.answer || json.html)) {
+      return (json.answer || stripHtml(json.html));
     }
-  } catch(_) {}
+  } catch (e1) {
+    // 再試 /api/report
+    try {
+      const json2 = await apiFetch("/api/report", { topic:"chat", mode:"free", question, language:"zh-TW", context });
+      if (json2?.ok && (json2.answer || json2.html)) {
+        return (json2.answer || stripHtml(json2.html));
+      }
+      throw new Error(json2?.error || "AI 沒有回傳有效內容");
+    } catch (e2) {
+      throw new Error(`主要端點失敗：${e1.message}\n後備端點失敗：${e2.message}`);
+    }
+  }
 
-  const res2 = await fetch(`${AI_API_BASE}/api/report`, {
-    method: "POST",
-    headers: { "Content-Type":"application/json" },
-    body: JSON.stringify({ topic:"chat", mode:"free", question, language:"zh-TW", context })
-  });
-  if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
-  const json2 = await res2.json();
-  if (json2?.ok && (json2.answer || json2.html)) return (json2.answer || stripHtml(json2.html));
   return "（AI 沒有回傳有效內容）";
+}
+
+async function healthCheckAI() {
+  try {
+    const res = await fetch(`${AI_API_BASE.replace(/\/$/, "")}/api/health`, { method: "GET", mode: "cors" });
+    const text = await res.text();
+    return res.ok ? `OK：${text || "healthy"}` : `HTTP ${res.status} ${res.statusText}：${text}`;
+  } catch (err) {
+    return `無法連線：${err.message}`;
+  }
 }
 
 function stripHtml(html){
