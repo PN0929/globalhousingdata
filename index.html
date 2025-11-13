@@ -6,13 +6,16 @@
   <title>國際住宅數據庫</title>
   <meta name="description" content="國際住宅數據庫：探索各國社宅定義、申請資格、再審查頻率、優先分配與社宅特徵" />
 
-  <!-- 這三行可協助降低快取，但真正生效的是下面連結後面的 ?v= -->
+  <!-- 降低快取 -->
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
 
-  <!-- 在檔名後加 ?v=版本字串，確保瀏覽器抓新版 -->
-  <link rel="stylesheet" href="./styles.css?v=20251113-11" />
+  <!-- favicon 避免 404 -->
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="18" fill="%230ea5a5"/><text x="50" y="62" font-size="52" text-anchor="middle" fill="white" font-family="Arial">H</text></svg>' />
+
+  <!-- 版本碼 -->
+  <link rel="stylesheet" href="./styles.css?v=20251113-12" />
 </head>
 <body>
   <div class="container">
@@ -27,6 +30,7 @@
         <a href="#/reassessment" class="nav-link" data-route="reassessment">再審查頻率</a>
         <a href="#/priority" class="nav-link" data-route="priority">優先分配</a>
         <a href="#/characteristics" class="nav-link" data-route="characteristics">社宅特徵</a>
+        <a href="#/ai" class="nav-link" data-route="ai">AI 對話</a>
       </nav>
     </header>
 
@@ -41,13 +45,11 @@
     </footer>
   </div>
 
-  <!-- 顯示目前載入版本，開 DevTools（F12）→ Console 可看到 -->
   <script>
-    window.APP_VERSION = "20251113-9";
+    window.APP_VERSION = "20251113-12";
     console.log("[cache-bust] styles/app 版本 =", window.APP_VERSION);
   </script>
 
-  <!-- 同樣在 app.js 後面加 ?v=版本字串 -->
-  <script src="./app.js?v=20251113-9"></script>
+  <script src="./app.js?v=20251113-12"></script>
 </body>
 </html>
