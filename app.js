@@ -1,5 +1,5 @@
 /* =================== AI 開關與後端位址 =================== */
-const ENABLE_AI = true; // 真 AI（Cloudflare Worker）→ true；只用本地規則摘要 → false
+const ENABLE_AI = true; // 走真 AI（Cloudflare Worker）→ true；想先用本地規則摘要 → false
 const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
@@ -19,7 +19,7 @@ function countryParam(name){ return encodeURIComponent(String(name||"").replace(
 /* CSV 解析（支援 BOM / 引號 / 逗號 / 換行） */
 function csvParse(text){
   if (!text) return [];
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // 去 BOM
   const rows=[]; let cur=[],cell="",inQ=false;
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
@@ -58,6 +58,7 @@ function normSearch(s){
 /* =================== 路由 =================== */
 window.addEventListener("DOMContentLoaded", () => {
   ensureTopnavActive();
+  ensureAIModal();      // 若 HTML 沒放 Modal，這裡會自動注入
   renderRoute();
   window.addEventListener("hashchange", () => { ensureTopnavActive(); renderRoute(); });
 });
@@ -79,7 +80,7 @@ function renderRoute(){
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else if(hash.startsWith("/priority"))     renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
-  else if(hash.startsWith("/ai"))           renderAiPage(main);
+  else if(hash.startsWith("/ai"))           renderAIChat(main);
   else renderHome(main);
 }
 
@@ -96,12 +97,12 @@ function getQueryParams(hash){
 
 /* =================== 首頁 =================== */
 const TOPICS = [
-  { slug: "definitions",     emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異",     available: true,  cta: "開始探索" },
-  { slug: "eligibility",     emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",       available: true,  cta: "查看矩陣" },
-  { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",             available: true,  cta: "查看頻率" },
-  { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",           available: true,  cta: "查看條件" },
-  { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",         available: true,  cta: "查看特徵" },
-  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "就資料庫問比較、是否存在、差異與國別摘要",           available: true,  cta: "開始對話" },
+  { slug: "definitions",     emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
+  { slug: "eligibility",     emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
+  { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
+  { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",     available: true,  cta: "查看條件" },
+  { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",     available: true,  cta: "查看特徵" },
+  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "開放式詢問：比較、摘要與差異（使用本站資料）", available: true,  cta: "開始對話" },
 ];
 
 function renderHome(root){
@@ -159,7 +160,7 @@ async function renderDefinitions(root){
 
   await loadDefinitions();
   buildDefControls();
-  renderDefCards(); // 只在按鈕時才會打 AI
+  renderDefCards();
 }
 
 async function loadDefinitions(){
@@ -181,7 +182,7 @@ async function loadDefinitions(){
     const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(iD>=0?(r[iD]||""):"").trim();
     if(!Country || !Definition) return null;
     const flags={}; TAG_RULES.forEach(rule=>flags[rule.key]=rule.regex.test(`${TermsUsed}\n${Definition}`));
-    return { Country, TermsUsed, Definition, short: shortText(Definition,200), flags };
+    return { Country, TermsUsed, Definition, short: shortText(Definition,230), flags };
   }).filter(Boolean);
 
   const map = new Map();
@@ -230,41 +231,31 @@ function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
   empty.style.display="none";
-
   wrap.innerHTML = DefState.filtered.map((d)=>{
     const chips = TAG_RULES.filter(t=>d.flagsCombined[t.key]).slice(0,3).map(t=>`<span class="chip">${t.label}</span>`).join("");
-    const multiple = d.items.length>1;
     const variants = d.items.map((it,i)=>`
       <div class="variant">
         <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
       </div>`).join("");
-
     return `
-      <article class="card ${multiple?"multiple":""}" data-country="${escapeHTML(d.Country)}">
+      <article class="card">
         <div class="card-header">
           <div>
             <div class="country">${escapeHTML(d.Country)}</div>
             <div class="terms">${escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"))}</div>
           </div>
+          <div class="actions" style="margin-top:-2px;">
+            <button class="btn ai-summary" data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
+          </div>
         </div>
-
         <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
-
-        <!-- 按一下才生成 AI 摘要 -->
-        <div class="actions" style="margin-top:10px;gap:6px;flex-wrap:wrap">
-          <button class="btn" data-ai-btn data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
-          <button class="btn toggle">展開全文</button>
-          ${multiple?`<span class="badge">共 ${d.items.length} 個定義</span>`:""}
+        <div class="actions">
           <div class="chips">${chips}</div>
         </div>
-
-        <!-- 生成結果會塞在這裡（預設隱藏） -->
-        <div class="ai-snippet" data-result-for="${escapeHTML(d.Country)}" style="display:none"></div>
-
         <div class="fulltext" style="display:none;">${variants}</div>
-
         <div class="actions" style="margin-top:8px">
+          <button class="btn toggle">展開全文</button>
           <a class="btn" href="#/eligibility">→ 申請資格</a>
           <a class="btn" href="#/reassessment?country=${countryParam(d.Country)}">→ 再審查頻率</a>
           <a class="btn" href="#/priority?country=${countryParam(d.Country)}">→ 優先分配</a>
@@ -273,7 +264,7 @@ function renderDefCards(){
       </article>`;
   }).join("");
 
-  // 展開全文切換
+  // 展開/收合全文
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
     if(btn){
@@ -285,79 +276,13 @@ function renderDefCards(){
     }
   };
 
-  // 綁定「產生 AI 摘要」按鈕（按一下才打 API）
-  attachDefinitionAISnippetHandlers(wrap);
-}
-
-/* === 定義頁：AI 國家摘要（按一下才生成） ===================== */
-function attachDefinitionAISnippetHandlers(scope){
-  scope.querySelectorAll('[data-ai-btn]').forEach((btn)=>{
-    btn.addEventListener('click', async ()=>{
-      const country = btn.getAttribute('data-country');
-      const card = btn.closest('.card');
-      const resultBox = card.querySelector(`[data-result-for="${country}"]`);
-
-      // 找該國定義資料
-      const record = DefState.data.find(d => d.Country === country);
-      const defs = (record?.items || []).map(x => ({
-        TermsUsed: x.TermsUsed,
-        Definition: x.Definition
-      }));
-
-      // UI 狀態：loading
-      const originalText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "產生中…";
-      resultBox.style.display = "block";
-      resultBox.innerHTML = `<em>AI 摘要生成中，可能需要數秒…</em>`;
-
-      try{
-        const html = await summarizeCountryDefinition(country, defs);
-        resultBox.innerHTML = html || `<span class="ai-error">未取得有效內容。</span>`;
-      }catch(err){
-        const more = err && err.message ? `<div class="note" style="margin-top:6px">${escapeHTML(err.message)}</div>` : "";
-        resultBox.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。</span><br>${escapeHTML(localCountryDefinitionFallback(country, defs))}${more}`;
-      }finally{
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
+  // 綁定 country 卡片上的「⚡ 產生 AI 摘要」
+  $$(".ai-summary", wrap).forEach(btn=>{
+    btn.addEventListener("click", async (ev)=>{
+      const country = ev.currentTarget.getAttribute("data-country") || "";
+      await generateCountryAISummary(country);
     });
   });
-}
-
-/* ✅ 改版重點：送「陣列 rows」給 /api/report（與 Worker 最穩合拍） */
-async function summarizeCountryDefinition(country, defs){
-  if(!ENABLE_AI || !AI_API_BASE) return localCountryDefinitionFallback(country, defs);
-
-  // 以陣列 rows 搭配 columns
-  const columns = ["Country", "TermsUsed", "Definition"];
-  const rows = (defs || []).map(d => [
-    country,
-    d?.TermsUsed || "",
-    d?.Definition || ""
-  ]);
-
-  if (!rows.length) return localCountryDefinitionFallback(country, defs);
-
-  const payload = {
-    topic: "definitions",
-    mode: "country",
-    language: "zh",            // 讓 Worker 走繁中邏輯
-    filters: { country },
-    data: { columns, rows, stats: {} }
-  };
-
-  const json = await apiFetch("/api/report", payload);
-  if (json?.ok && json?.html) return json.html;
-
-  // 若 ok=false 或沒有 html，就丟錯讓外層顯示原因 + fallback
-  throw new Error(json?.error ? `Worker 回應錯誤：${json.error}` : "Worker 未回傳 html");
-}
-
-function localCountryDefinitionFallback(country, defs){
-  if(!defs || !defs.length) return `<strong>${escapeHTML(country)}</strong>：尚無定義資料。`;
-  const joined = defs.map((d,i)=>`#${i+1}【稱呼】${d.TermsUsed || "—"}；【定義】${shortText(d.Definition, 280)}`).join(" / ");
-  return `<strong>${escapeHTML(country)}</strong> 的社宅定義摘要：${escapeHTML(joined)}`;
 }
 
 /* =================== 申請資格 =================== */
@@ -982,206 +907,224 @@ function pill(v){
   return `<span class="pill na">NA</span>`;
 }
 
-/* ============================================================
-   AI 對話頁（#/ai）
-   ============================================================ */
-async function renderAiPage(container) {
-  const COUNTRIES = ["台灣","日本","韓國","德國","法國","荷蘭","英國","瑞典","加拿大","澳洲","紐西蘭","美國","義大利","西班牙","挪威","丹麥","芬蘭"];
-
-  const EXAMPLES = [
-    `請幫我總結 ${COUNTRIES[5]} 的社宅定義與重點制度。`,
-    `${COUNTRIES[1]} 與 ${COUNTRIES[3]} 在「優先分配」是否都有針對長者？`,
-    `哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。`,
-    `${COUNTRIES[0]} 和 ${COUNTRIES[2]} 的申請資格差異為何？請用表格列點。`,
-  ];
-
-  container.innerHTML = `
-    <section class="ai-page">
-      <div class="ai-hero">
-        <h2>🤖 AI 對話</h2>
-        <p class="muted">這裡可以詢問關於本資料庫的開放式問題：機制比較、各國摘要與差異等。由AI機器人替您摘錄數據庫重點回覆。</p>
+/* =================== AI Modal（定義卡片摘要用） =================== */
+function ensureAIModal(){
+  if (document.getElementById("ai-modal")) return;
+  const div = document.createElement("div");
+  div.id = "ai-modal";
+  div.className = "ai-modal";
+  div.style.display = "none";
+  div.innerHTML = `
+    <div class="ai-modal-content">
+      <div class="ai-modal-header">
+        <strong>AI 摘要</strong>
+        <button id="ai-close" class="btn">✕</button>
       </div>
-
-      <div class="ai-chat" id="aiChat">
-        <!-- 1) 快速提問 -->
-        <div class="ai-hint">
-          <div class="hint-title">快速提問（點一下即可帶入輸入框）</div>
-          <div class="ai-suggest" id="aiSuggest"></div>
-          <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
-            <button id="aiHealthBtn" class="btn">測試連線</button>
-            <span id="aiHealthMsg" class="note"></span>
-          </div>
-        </div>
-
-        <!-- 2) 輸入框 -->
-        <form id="chatForm" class="chat-form">
-          <textarea id="chatInput" placeholder="輸入你的問題，例如：\n- ${EXAMPLES[0]}\n- ${EXAMPLES[1]}"></textarea>
-          <button type="submit" class="btn primary">送出</button>
-        </form>
-
-        <!-- 3) 聊天紀錄 -->
-        <div class="chat-log" id="chatLog" aria-live="polite"></div>
-      </div>
-    </section>
+      <div id="ai-body" class="ai-modal-body">產生中…</div>
+    </div>
   `;
+  document.body.appendChild(div);
+  $("#ai-close").onclick = () => (div.style.display = "none");
+}
 
-  // 渲染可點示例
-  const suggest = container.querySelector('#aiSuggest');
-  suggest.innerHTML = EXAMPLES.map(q => `<span class="suggest-pill" data-q="${escapeHTML(q)}">${escapeHTML(q)}</span>`).join("");
-  suggest.addEventListener('click', (e) => {
-    const pill = e.target.closest('.suggest-pill');
-    if (!pill) return;
-    const q = pill.getAttribute('data-q');
-    const ta = container.querySelector('#chatInput');
+/* =================== 定義卡片：單一國家「⚡ 產生 AI 摘要」 =================== */
+async function generateCountryAISummary(country){
+  try{
+    // 從 DefState 找到該國 rows
+    const group = DefState.data.find(d=>d.Country===country);
+    if(!group){ showAIModalHTML(`<p>找不到 ${escapeHTML(country)} 的資料。</p>`); return; }
+
+    // 組 columns/rows（僅 definitions 三欄）
+    const columns = ["Country","TermsUsed","Definition"];
+    const rows = group.items.map(it=>[it.Country, it.TermsUsed || "", it.Definition || ""]);
+
+    if (ENABLE_AI && AI_API_BASE){
+      showAIModalHTML("產生中…");
+      const payload = {
+        topic:"definitions",
+        mode:"country",
+        language:"zh-TW",
+        filters:{ country },
+        data:{ columns, rows, stats:{} }
+      };
+      const resp = await fetch(`${AI_API_BASE}/api/report`,{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await resp.json();
+      if(json.ok && json.html){
+        showAIModalHTML(json.html);
+      }else{
+        // fallback：本地規則
+        const html = localRulesSummaryCountry(country, columns, rows);
+        showAIModalHTML(html || "<p>AI 摘要失敗，且無本地資料可用。</p>");
+      }
+    }else{
+      const html = localRulesSummaryCountry(country, columns, rows);
+      showAIModalHTML(html);
+    }
+  }catch(e){
+    showAIModalHTML(`<p>產生失敗：${escapeHTML(e.message)}</p>`);
+  }
+}
+
+function showAIModalHTML(html){
+  ensureAIModal();
+  const modal = $("#ai-modal"), body=$("#ai-body");
+  if(body) body.innerHTML = html;
+  if(modal) modal.style.display = "flex";
+}
+
+function localRulesSummaryCountry(country, columns, rows){
+  const iC = 0, iT = 1, iD = 2;
+  const defs = rows.filter(r=>r[iC]===country && r[iD]).slice(0,5);
+  if(!defs.length) return `<p><strong>${escapeHTML(country)}</strong>：無摘要可用</p>`;
+  const bullets = defs.map((d,i)=>{
+    const parts=[];
+    if(d[iT]) parts.push(`【名詞】${escapeHTML(d[iT])}`);
+    if(d[iD]) parts.push(`【定義】${escapeHTML(shortText(d[iD],420))}`);
+    return `<li>#${i+1}${parts.join("；")}</li>`;
+  }).join("");
+  return `<p><strong>${escapeHTML(country)} 的社會住宅：名詞與定義</strong></p><ul>${bullets}</ul>`;
+}
+
+/* =================== 🤖 AI 對話頁 =================== */
+function renderAIChat(root){
+  const sec = document.createElement("section");
+  sec.className = "ai-card fade-in";
+  sec.innerHTML = `
+    <div class="ai-title">🤖 AI 對話</div>
+    <div class="ai-sub">這裡可以詢問關於本資料庫的開放式問題：機制比較、各國摘要與差異等。由 AI 替您摘錄數據庫重點回覆。</div>
+
+    <!-- 1) 快速提問（點一下帶入輸入框） -->
+    <div class="ai-quick" id="aiQuickRow">
+      ${[
+        "請幫我總結 荷蘭 的社宅定義與重點制度。",
+        "日本 與 德國 在「優先分配」是否都有針對長者？",
+        "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
+        "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+      ].map(q=>`<button class="chip" data-q="${escapeHTML(q)}">${escapeHTML(q)}</button>`).join("")}
+    </div>
+
+    <!-- 2) 輸入框 -->
+    <div class="ai-input">
+      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與再審查差異」"></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="aiSend"   class="btn primary">送出</button>
+        <button id="aiHealth" class="btn">測試連線</button>
+      </div>
+    </div>
+
+    <!-- 3) 聊天紀錄 -->
+    <div class="ai-chat-log" id="aiLog">
+      <div class="ai-msg assistant">
+        <div class="who">AI</div>
+        <div class="bubble">嗨！我可以根據本網站的資料庫，幫你做跨國比較與摘要。可直接點上面的快速提問，或自行輸入問題。</div>
+      </div>
+    </div>
+
+    <div class="ai-actions">
+      <span class="status" id="aiStatus">就緒</span>
+    </div>
+  `;
+  root.appendChild(sec);
+
+  const $I = (sel) => sec.querySelector(sel);
+
+  // 快速提問 → 帶入輸入框
+  $I("#aiQuickRow").addEventListener("click",(e)=>{
+    const btn = e.target.closest("button.chip");
+    if(!btn) return;
+    const q = btn.dataset.q || "";
+    const ta = $I("#aiInput");
     ta.value = q;
     ta.focus();
+    ta.scrollIntoView({behavior:"smooth", block:"center"});
   });
 
-  // 健康檢查
-  const healthBtn = container.querySelector('#aiHealthBtn');
-  const healthMsg = container.querySelector('#aiHealthMsg');
-  healthBtn.addEventListener('click', async () => {
-    healthBtn.disabled = true;
-    healthMsg.textContent = "檢查中…";
-    try {
-      const msg = await healthCheckAI();
-      healthMsg.textContent = msg;
-    } catch (e) {
-      healthMsg.textContent = `錯誤：${e.message}`;
-    } finally {
-      healthBtn.disabled = false;
+  // 測試健康檢查
+  $I("#aiHealth").onclick = async ()=>{
+    setStatus("測試連線中…");
+    try{
+      const r = await fetch(`${AI_API_BASE}/api/health`, { method:"GET" });
+      const ok = r.ok ? "成功" : `失敗(${r.status})`;
+      pushAssistant(`<p>健康檢查：${ok}</p>`);
+      setStatus("就緒");
+    }catch(e){
+      pushAssistant(`<p>健康檢查失敗：${escapeHTML(e.message)}</p>`);
+      setStatus("就緒");
     }
-  });
+  };
 
-  const chatLog = container.querySelector('#chatLog');
-  const form = container.querySelector('#chatForm');
-  const input = container.querySelector('#chatInput');
+  // 送出問題
+  $I("#aiSend").onclick = async ()=>{
+    const q = ($I("#aiInput").value || "").trim();
+    if(!q){ $I("#aiInput").focus(); return; }
+    pushUser(q);
+    $I("#aiInput").value = "";
+    setStatus("分析中…");
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
-
-    appendChatBubble(chatLog, 'user', q);
-    input.value = '';
-    input.disabled = true;
-
-    try {
-      const answer = await aiQuery(q, {
-        sources: {
-          definitions: CSV_DEFINITIONS,
-          eligibility: CSV_ELIGIBILITY,
-          reassessment: CSV_REASSESSMENT,
-          priority: CSV_PRIORITY,
-          characteristics: CSV_CHARACTERISTICS,
+    try{
+      const payload = {
+        question: q,
+        language: "zh-TW",
+        context: {
+          sources: {
+            definitions:     CSV_DEFINITIONS,
+            eligibility:     CSV_ELIGIBILITY,
+            reassessment:    CSV_REASSESSMENT,
+            priority:        CSV_PRIORITY,
+            characteristics: CSV_CHARACTERISTICS
+          }
         }
+      };
+      const resp = await fetch(`${AI_API_BASE}/api/chat`, {
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
       });
-      appendChatBubble(chatLog, 'assistant', answer || '（沒有取得回覆，請稍後再試）');
-    } catch (err) {
-      const hint = [
-        "可能原因：",
-        "1) Cloudflare Worker CORS 未開（需回傳 Access-Control-Allow-Origin: *、Allow-Headers: Content-Type、Allow-Methods: POST, GET）。",
-        "2) API 路徑或 payload 不符（/api/chat 或 /api/report）。",
-        "3) Worker 錯誤或逾時。"
-      ].join("\n");
-      appendChatBubble(chatLog, 'assistant', `抱歉，回覆失敗。\n${err.message}\n\n${hint}`);
-      console.error("[AI Chat Error]", err);
-    } finally {
-      input.disabled = false;
-      input.focus();
+      const json = await resp.json();
+      if(json.ok && (json.html || json.answer)){
+        pushAssistant(json.html || escapeHTML(json.answer));
+      }else{
+        pushAssistant(`<p>抱歉，回覆失敗了：${escapeHTML(json.error || ("HTTP "+resp.status))}</p>`);
+      }
+    }catch(e){
+      pushAssistant(`<p>抱歉，回覆失敗了：${escapeHTML(e.message)}</p>`);
+    }finally{
+      setStatus("就緒");
+    }
+  };
+
+  // Ctrl/Cmd+Enter 送出
+  $I("#aiInput").addEventListener("keydown",(e)=>{
+    if((e.metaKey || e.ctrlKey) && e.key === "Enter"){
+      e.preventDefault();
+      $I("#aiSend").click();
     }
   });
-}
 
-function appendChatBubble(root, role, text) {
-  const item = document.createElement('div');
-  item.className = `bubble ${role}`;
-  item.innerText = text;
-  root.appendChild(item);
-  root.scrollTop = root.scrollHeight;
-}
-
-/* ------------------- 更可靠的 fetch 包裝 + 健檢 ------------------- */
-async function apiFetch(path, payload, {timeoutMs = 20000} = {}) {
-  const url = `${AI_API_BASE.replace(/\/$/, "")}${path}`;
-  const controller = new AbortController();
-  const to = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      mode: "cors",
-      body: JSON.stringify(payload || {}),
-      signal: controller.signal
-    });
-
-    const text = await res.text(); // 先拿原文，方便除錯
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch (e) {}
-
-    if (!res.ok) {
-      const detail = json?.error || json?.message || text || `HTTP ${res.status}`;
-      throw new Error(`HTTP ${res.status} ${res.statusText} - ${detail}`);
-    }
-    if (!json) throw new Error("空的回應（非 JSON）");
-
-    return json;
-  } catch (err) {
-    if (err.name === "AbortError") throw new Error("連線逾時（timeout）");
-    throw err;
-  } finally {
-    clearTimeout(to);
+  function setStatus(t){ const s=$I("#aiStatus"); if(s) s.textContent=t; }
+  function pushUser(text){
+    const log = $I("#aiLog");
+    log.insertAdjacentHTML("beforeend", `
+      <div class="ai-msg user">
+        <div class="who">我</div>
+        <div class="bubble">${escapeHTML(text).replace(/\n/g,"<br>")}</div>
+      </div>
+    `);
+    log.scrollTop = log.scrollHeight;
+  }
+  function pushAssistant(html){
+    const log = $I("#aiLog");
+    log.insertAdjacentHTML("beforeend", `
+      <div class="ai-msg assistant">
+        <div class="who">AI</div>
+        <div class="bubble">${html}</div>
+      </div>
+    `);
+    log.scrollTop = log.scrollHeight;
   }
 }
 
-async function aiQuery(question, context) {
-  if (!ENABLE_AI || !AI_API_BASE) {
-    return mockAnswer(question);
-  }
-
-  // 直接打你的 /api/chat（你已在 Worker 新增真回答或示範回答）
-  try {
-    const json = await apiFetch("/api/chat", { question, context, language: "zh-TW" });
-    if (json?.ok && (json.answer || json.html)) {
-      return (json.answer || stripHtml(json.html));
-    }
-  } catch (e1) {
-    // 回退 /api/report（很少會用到）
-    try {
-      const json2 = await apiFetch("/api/report", { topic:"chat", mode:"free", question, language:"zh", context });
-      if (json2?.ok && (json2.answer || json2.html)) {
-        return (json2.answer || stripHtml(json2.html));
-      }
-      throw new Error(json2?.error || "AI 沒有回傳有效內容");
-    } catch (e2) {
-      throw new Error(`主要端點失敗：${e1.message}\n後備端點失敗：${e2.message}`);
-    }
-  }
-
-  return "（AI 沒有回傳有效內容）";
-}
-
-async function healthCheckAI() {
-  try {
-    const res = await fetch(`${AI_API_BASE.replace(/\/$/, "")}/api/health`, { method: "GET", mode: "cors" });
-    const text = await res.text();
-    return res.ok ? `OK：${text || "healthy"}` : `HTTP ${res.status} ${res.statusText}：${text}`;
-  } catch (err) {
-    return `無法連線：${err.message}`;
-  }
-}
-
-function stripHtml(html){
-  const div = document.createElement("div");
-  div.innerHTML = html || "";
-  return div.innerText.trim();
-}
-
-function mockAnswer(q){
-  const lq = q.toLowerCase();
-  if(lq.includes("哪個國家") && lq.includes("比較好")) return "示例：若以「可近性 + 租金負擔」綜合評估，A 國與 B 國表現相對較佳（開發中，待真實資料接上）。";
-  if(lq.includes("是否都有")) return "示例：A 國與 B 國在「租金補貼」皆有設計，但細節門檻不同（開發中）。";
-  if(lq.includes("總結") || lq.includes("摘要")) return "示例：C 國社宅聚焦於弱勢戶優先、租金管制與再審查，每 X 年檢核一次（開發中）。";
-  return "我可以幫你比較項目、檢查是否存在，或總結特定國家；請再換個說法試試！";
-}
+/* =================== 結束 =================== */
