@@ -295,8 +295,7 @@ function attachDefinitionAISnippetHandlers(scope){
     btn.addEventListener('click', async ()=>{
       const country = btn.getAttribute('data-country');
       const card = btn.closest('.card');
-      const selector = `[data-result-for="${(country||"").replace(/"/g,'\\"')}"]`;
-      const resultBox = card.querySelector(selector);
+      const resultBox = card.querySelector(`[data-result-for="${CSS.escape(country)}"]`);
 
       // 找該國定義資料
       const record = DefState.data.find(d => d.Country === country);
@@ -1010,7 +1009,7 @@ async function renderAiPage(container) {
         <div class="chat-log" id="chatLog" aria-live="polite"></div>
       </div>
     </section>
-  ";
+  `;
 
   // 渲染可點示例
   const suggest = container.querySelector('#aiSuggest');
