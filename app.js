@@ -2,7 +2,7 @@
 const ENABLE_AI = true;
 const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev";
 
-/* =================== 資料路徑（GitHub Raw CSV） =================== */
+/* =================== 資料路徑（GitHub Raw CSV） - 全部使用 main =================== */
 const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_housing_definitions_clean_utf8.csv";
 const CSV_ELIGIBILITY     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
 const CSV_REASSESSMENT    = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
@@ -158,17 +158,30 @@ async function renderDefinitions(root){
 async function loadDefinitions(){
   let text="";
   try{
-    const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    console.log("[DEBUG] 開始載入 CSV_DEFINITIONS:", CSV_DEFINITIONS);
+    const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"}); 
+    console.log("[DEBUG] CSV 回應狀態:", resp.status, resp.statusText);
+    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
-  }catch(err){ console.error("Fetch CSV_DEFINITIONS failed:", err); DefState.data=[]; DefState.filtered=[]; return; }
+    console.log("[DEBUG] CSV 文字長度:", text.length, "前100字:", text.substring(0,100));
+  }catch(err){ 
+    console.error("❌ Fetch CSV_DEFINITIONS failed:", err); 
+    DefState.data=[]; DefState.filtered=[]; 
+    return; 
+  }
 
   const rows = csvParse(text);
+  console.log("[DEBUG] CSV 解析後行數:", rows.length);
   if(!rows.length){ DefState.data=[]; DefState.filtered=[]; return; }
 
   const headers = rows[0];
+  console.log("[DEBUG] CSV 標頭:", headers);
+  
   const iC = idxByAliases(headers, ["country"]);
   const iT = idxByAliases(headers, ["termsused","term(s)used","terms"]);
   const iD = idxByAliases(headers, ["definition","definitionandsummaryoverview","definitionoverview"]);
+
+  console.log("[DEBUG] 欄位索引 - Country:", iC, "Terms:", iT, "Definition:", iD);
 
   const raw = rows.slice(1).map(r=>{
     const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(iD>=0?(r[iD]||""):"").trim();
@@ -176,6 +189,8 @@ async function loadDefinitions(){
     const flags={}; TAG_RULES.forEach(rule=>flags[rule.key]=rule.regex.test(`${TermsUsed}\n${Definition}`));
     return { Country, TermsUsed, Definition, short: shortText(Definition,200), flags };
   }).filter(Boolean);
+
+  console.log("[DEBUG] 有效資料筆數:", raw.length);
 
   const map = new Map();
   for(const it of raw){
@@ -189,6 +204,8 @@ async function loadDefinitions(){
     Country:g.Country, items:g.items, flagsCombined:g.flagsCombined, termsJoined:Array.from(g.termsSet).join("；")
   })).sort((a,b)=>a.Country.localeCompare(b.Country));
   DefState.filtered = DefState.data.slice();
+  
+  console.log("[DEBUG] 最終國家數:", DefState.data.length);
 }
 
 function buildDefControls(){
@@ -983,6 +1000,8 @@ let CHAT_DATA = null;
 async function loadAllDatasetsForChat(){
   if (CHAT_DATA) return CHAT_DATA;
 
+  console.log("[AI Chat] 開始載入所有資料集...");
+
   // 1) 定義
   const defTxt = await (await fetch(CSV_DEFINITIONS,{cache:"no-store"})).text();
   const defRows = csvParse(defTxt); const dh = defRows[0]||[];
@@ -994,6 +1013,8 @@ async function loadAllDatasetsForChat(){
     if(!Country||!Definition) return null;
     return { country:Country, terms:Terms, definition:Definition };
   }).filter(Boolean);
+
+  console.log("[AI Chat] Definitions 載入:", definitions.length, "筆");
 
   // 2) 申請資格
   const eliTxt = await (await fetch(CSV_ELIGIBILITY,{cache:"no-store"})).text();
@@ -1010,6 +1031,8 @@ async function loadAllDatasetsForChat(){
     return { country:c, all:(r[eAll]||"").trim(), income:(r[eInc]||"").trim(), pr:(r[ePR]||"").trim(), residency:(r[eRes]||"").trim(), employment:(r[eEmp]||"").trim(), note:(r[eNote]||"").trim() };
   }).filter(Boolean);
 
+  console.log("[AI Chat] Eligibility 載入:", eligibility.length, "筆");
+
   // 3) 再審查
   const reaTxt = await (await fetch(CSV_REASSESSMENT,{cache:"no-store"})).text();
   const reaRows = csvParse(reaTxt); const rh=reaRows[0]||[];
@@ -1021,6 +1044,8 @@ async function loadAllDatasetsForChat(){
     const c=(r[rc]||"").trim(); if(!c) return null;
     return { country:c, segment:(r[rseg]||"").trim(), frequency:(r[rfr]||"").trim(), detail:(r[rdet]||"").trim() };
   }).filter(Boolean);
+
+  console.log("[AI Chat] Reassessment 載入:", reassessment.length, "筆");
 
   // 4) 優先分配
   const priTxt = await (await fetch(CSV_PRIORITY,{cache:"no-store"})).text();
@@ -1040,6 +1065,8 @@ async function loadAllDatasetsForChat(){
     return { country:c, waiting:(r[pWait]||"").trim(), income:(r[pInc]||"").trim(), disability:(r[pDis]||"").trim(), elderly:(r[pEld]||"").trim(), asylum:(r[pAsy]||"").trim(), ethnic:(r[pEth]||"").trim(), hhsize:(r[pHH]||"").trim(), condition:(r[pCond]||"").trim(), note:(r[pNote]||"").trim() };
   }).filter(Boolean);
 
+  console.log("[AI Chat] Priority 載入:", priority.length, "筆");
+
   // 5) 特徵
   const chaTxt = await (await fetch(CSV_CHARACTERISTICS,{cache:"no-store"})).text();
   const chaRows = csvParse(chaTxt); const ch=chaRows[0]||[];
@@ -1058,9 +1085,13 @@ async function loadAllDatasetsForChat(){
     return { country:c, market:(r[cMB]||"").trim(), cost:(r[cCB]||"").trim(), income:(r[cIB]||"").trim(), utility:(r[cUB]||"").trim(), incReg:(r[cReg]||"").trim(), incNot:(r[cNot]||"").trim(), pct:(r[cPct]||"").trim(), buy:(r[cBuy]||"").trim(), note:(r[cNote]||"").trim() };
   }).filter(Boolean);
 
+  console.log("[AI Chat] Characteristics 載入:", characteristics.length, "筆");
+
   CHAT_DATA = { definitions, eligibility, reassessment, priority, characteristics };
+  console.log("[AI Chat] 所有資料載入完成！");
   return CHAT_DATA;
 }
+
 function renderAIChat(root){
   const sec = document.createElement("section");
   sec.id = "ai";
@@ -1084,8 +1115,9 @@ function renderAIChat(root){
 
   const tips = [
     "請幫我總結 荷蘭 的社宅定義與重點制度。",
-    "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
-    "日本 和 韓國 的申請資格差異為何？請用表格列點。"
+    "日本 與 德國 在「優先分配」是否都有針對長者？",
+    "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
+    "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
   ];
   $("#aiQuick").innerHTML = tips.map(t=>`<button class="chip" data-q="${escapeHTML(t)}">${escapeHTML(t)}</button>`).join("");
   $("#aiQuick").addEventListener("click", (e)=>{
@@ -1108,14 +1140,17 @@ function renderAIChat(root){
 
     try{
       const datasets = await loadAllDatasetsForChat();
+      console.log("[AI Ask] 資料集已載入:", datasets);
 
       const payload = {
         topic:"chat",
         mode:"qa",
         language:"zh",
         question:q,
-        data: { datasets }
+        data: datasets  // 直接傳送 datasets
       };
+
+      console.log("[AI Ask] 傳送 payload:", payload);
 
       let html = "";
       if (ENABLE_AI && AI_API_BASE){
@@ -1124,6 +1159,7 @@ function renderAIChat(root){
           body: JSON.stringify(payload)
         });
         const j = await r.json();
+        console.log("[AI Ask] 收到回應:", j);
         if (!j.ok) throw new Error(j.error || "AI failed");
         html = j.html || "（沒有內容）";
       }else{
@@ -1132,7 +1168,8 @@ function renderAIChat(root){
       appendMsg("assistant", html, true);
       setStatus("");
     }catch(e){
-      appendMsg("assistant", `<p>抱歉，回覆失敗了。</p>`, true);
+      console.error("[AI Ask] 錯誤:", e);
+      appendMsg("assistant", `<p>抱歉，回覆失敗了：${e.message}</p>`, true);
       setStatus("");
     }
   }
