@@ -262,3 +262,55 @@ section{ margin-bottom: var(--section-gap); }
 /* =============== 動畫/雜項 =============== */
 .fade-in{animation:fade .24s ease}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* ===== HOTFIX: 全站左右對齊 & 區塊留白，強制覆蓋 ===== */
+:root{
+  --page-x: 22px;
+}
+@media (max-width: 680px){
+  :root{ --page-x: 14px; }
+}
+
+/* 容器置中與最大寬度（保險） */
+.container{
+  max-width: 1200px !important;
+  margin: 0 auto !important;
+}
+
+/* Header / Main / Footer 左右邊距一致 */
+header{
+  padding-left: var(--page-x) !important;
+  padding-right: var(--page-x) !important;
+}
+.main-content{
+  padding-left: var(--page-x) !important;
+  padding-right: var(--page-x) !important;
+  margin-top: 18px !important; /* 主內容與 header 之間留白 */
+}
+footer{
+  padding-left: var(--page-x) !important;
+  padding-right: var(--page-x) !important;
+  margin-top: 18px !important; /* 底部留白 */
+}
+
+/* 主要 section 之間一致留白 */
+section{
+  margin-bottom: 18px !important;
+}
+
+/* 卡片/表格區塊與前面控制列的間距保險 */
+.cards{
+  margin-top: 12px !important;
+}
+.matrix{
+  margin-top: 12px !important;
+}
+
+/* 定義卡底部四個導覽按鈕在同一行（保險） */
+.link-row{
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+}
+.link-row .btn{
+  white-space: nowrap !important;
+}
+
