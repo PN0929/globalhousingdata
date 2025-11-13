@@ -206,3 +206,37 @@ footer{margin-top:22px;text-align:center;color:var(--muted);font-size:13px}
 }
 .ai-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .ai-modal-body{max-height:70dvh;overflow:auto}
+
+/* === 社宅定義卡：底部行為＆排版微調 === */
+.def-card .summary{
+  font-size:14.5px;
+  color:var(--ink-2);
+  line-height:1.75;
+}
+
+/* 四個導覽按鈕同一行，窄螢幕可橫向滾動，不換行 */
+.link-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:nowrap;         /* 關鍵：不換行 */
+  overflow:auto;            /* 小螢幕可滑動 */
+  -webkit-overflow-scrolling: touch;
+  padding-bottom:2px;
+}
+.link-row .btn{ white-space:nowrap; }
+
+/* AI 摘要按鈕獨立一整行 */
+.ai-row{
+  margin-top:8px;
+  display:flex;
+}
+.ai-row .btn{
+  width:100%;
+  justify-content:center;
+}
+
+/* 讓長卡的全文區塊與按鈕間距更舒服 */
+.def-card .fulltext{ margin-top:8px; }
+.def-card .actions + .fulltext{ margin-top:6px; }
+
