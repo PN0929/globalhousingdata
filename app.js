@@ -79,7 +79,7 @@ function renderRoute(){
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else if(hash.startsWith("/priority"))     renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
-  else if(hash.startsWith("/ai"))           renderAiPage(main);  // AI 對話路由
+  else if(hash.startsWith("/ai"))           renderAiPage(main);
   else renderHome(main);
 }
 
@@ -159,7 +159,7 @@ async function renderDefinitions(root){
 
   await loadDefinitions();
   buildDefControls();
-  renderDefCards(); // 不自動打 AI，需按鈕觸發
+  renderDefCards(); // 只在按鈕時才會打 AI
 }
 
 async function loadDefinitions(){
@@ -295,7 +295,7 @@ function attachDefinitionAISnippetHandlers(scope){
     btn.addEventListener('click', async ()=>{
       const country = btn.getAttribute('data-country');
       const card = btn.closest('.card');
-      const resultBox = card.querySelector(`[data-result-for="${CSS.escape(country)}"]`);
+      const resultBox = card.querySelector(`[data-result-for="${country}"]`);
 
       // 找該國定義資料
       const record = DefState.data.find(d => d.Country === country);
@@ -315,7 +315,8 @@ function attachDefinitionAISnippetHandlers(scope){
         const html = await summarizeCountryDefinition(country, defs);
         resultBox.innerHTML = html || `<span class="ai-error">未取得有效內容。</span>`;
       }catch(err){
-        resultBox.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。<br>${escapeHTML(localCountryDefinitionFallback(country, defs))}</span>`;
+        const more = err && err.message ? `<div class="note" style="margin-top:6px">${escapeHTML(err.message)}</div>` : "";
+        resultBox.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。</span><br>${escapeHTML(localCountryDefinitionFallback(country, defs))}${more}`;
       }finally{
         btn.disabled = false;
         btn.textContent = originalText;
@@ -324,38 +325,35 @@ function attachDefinitionAISnippetHandlers(scope){
   });
 }
 
-/* 🔁 這是你要覆蓋的第 1 個函式：改成送小表格給 /api/report */
+/* ✅ 改版重點：送「陣列 rows」給 /api/report（與 Worker 最穩合拍） */
 async function summarizeCountryDefinition(country, defs){
   if(!ENABLE_AI || !AI_API_BASE) return localCountryDefinitionFallback(country, defs);
 
-  // 你的 Worker 要求 data.columns + data.rows（rows 為陣列），language 請用 "zh"
+  // 以陣列 rows 搭配 columns
   const columns = ["Country", "TermsUsed", "Definition"];
-  const rows = (defs || []).map(d => ({
-    Country: country,
-    TermsUsed: d?.TermsUsed || "",
-    Definition: d?.Definition || ""
-  }));
+  const rows = (defs || []).map(d => [
+    country,
+    d?.TermsUsed || "",
+    d?.Definition || ""
+  ]);
 
   if (!rows.length) return localCountryDefinitionFallback(country, defs);
 
   const payload = {
     topic: "definitions",
     mode: "country",
-    language: "zh",            // ← 你的 Worker buildPrompt 用 "zh" 判斷中文
+    language: "zh",            // 讓 Worker 走繁中邏輯
     filters: { country },
     data: { columns, rows, stats: {} }
   };
 
-  try{
-    const json = await apiFetch("/api/report", payload);
-    if (json?.ok && json?.html) return json.html;
-    return localCountryDefinitionFallback(country, defs);
-  }catch(e){
-    return localCountryDefinitionFallback(country, defs);
-  }
+  const json = await apiFetch("/api/report", payload);
+  if (json?.ok && json?.html) return json.html;
+
+  // 若 ok=false 或沒有 html，就丟錯讓外層顯示原因 + fallback
+  throw new Error(json?.error ? `Worker 回應錯誤：${json.error}` : "Worker 未回傳 html");
 }
 
-/* 🔁 這是你要覆蓋的第 2 個函式：本地 fallback（保留即可） */
 function localCountryDefinitionFallback(country, defs){
   if(!defs || !defs.length) return `<strong>${escapeHTML(country)}</strong>：尚無定義資料。`;
   const joined = defs.map((d,i)=>`#${i+1}【稱呼】${d.TermsUsed || "—"}；【定義】${shortText(d.Definition, 280)}`).join(" / ");
@@ -985,7 +983,7 @@ function pill(v){
 }
 
 /* ============================================================
-   AI 對話頁（#/ai）— 先「快速提問」→「輸入框」→「聊天紀錄」
+   AI 對話頁（#/ai）
    ============================================================ */
 async function renderAiPage(container) {
   const COUNTRIES = ["台灣","日本","韓國","德國","法國","荷蘭","英國","瑞典","加拿大","澳洲","紐西蘭","美國","義大利","西班牙","挪威","丹麥","芬蘭"];
@@ -1142,7 +1140,7 @@ async function aiQuery(question, context) {
     return mockAnswer(question);
   }
 
-  // 直接打你的 /api/chat（你已在 Worker 新增真回答）
+  // 直接打你的 /api/chat（你已在 Worker 新增真回答或示範回答）
   try {
     const json = await apiFetch("/api/chat", { question, context, language: "zh-TW" });
     if (json?.ok && (json.answer || json.html)) {
