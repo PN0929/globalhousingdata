@@ -19,7 +19,7 @@ function countryParam(name){ return encodeURIComponent(String(name||"").replace(
 /* CSV 解析（支援 BOM / 引號 / 逗號 / 換行） */
 function csvParse(text){
   if (!text) return [];
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // 去 BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   const rows=[]; let cur=[],cell="",inQ=false;
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
@@ -159,7 +159,7 @@ async function renderDefinitions(root){
 
   await loadDefinitions();
   buildDefControls();
-  renderDefCards(); // 不自動生成 AI 摘要，改為點擊後才生成
+  renderDefCards(); // 不自動打 AI，需按鈕觸發
 }
 
 async function loadDefinitions(){
@@ -324,24 +324,40 @@ function attachDefinitionAISnippetHandlers(scope){
   });
 }
 
+/* 🔁 這是你要覆蓋的第 1 個函式：改成送小表格給 /api/report */
 async function summarizeCountryDefinition(country, defs){
   if(!ENABLE_AI || !AI_API_BASE) return localCountryDefinitionFallback(country, defs);
+
+  // 你的 Worker 要求 data.columns + data.rows（rows 為陣列），language 請用 "zh"
+  const columns = ["Country", "TermsUsed", "Definition"];
+  const rows = (defs || []).map(d => ({
+    Country: country,
+    TermsUsed: d?.TermsUsed || "",
+    Definition: d?.Definition || ""
+  }));
+
+  if (!rows.length) return localCountryDefinitionFallback(country, defs);
 
   const payload = {
     topic: "definitions",
     mode: "country",
-    language: "zh-TW",
-    country,
-    context: { definitions: defs }
+    language: "zh",            // ← 你的 Worker buildPrompt 用 "zh" 判斷中文
+    filters: { country },
+    data: { columns, rows, stats: {} }
   };
 
-  const json = await apiFetch("/api/report", payload);
-  if(json?.ok && json?.html) return json.html;
-  return localCountryDefinitionFallback(country, defs);
+  try{
+    const json = await apiFetch("/api/report", payload);
+    if (json?.ok && json?.html) return json.html;
+    return localCountryDefinitionFallback(country, defs);
+  }catch(e){
+    return localCountryDefinitionFallback(country, defs);
+  }
 }
 
+/* 🔁 這是你要覆蓋的第 2 個函式：本地 fallback（保留即可） */
 function localCountryDefinitionFallback(country, defs){
-  if(!defs || !defs.length) return `${country}：尚無定義資料。`;
+  if(!defs || !defs.length) return `<strong>${escapeHTML(country)}</strong>：尚無定義資料。`;
   const joined = defs.map((d,i)=>`#${i+1}【稱呼】${d.TermsUsed || "—"}；【定義】${shortText(d.Definition, 280)}`).join(" / ");
   return `<strong>${escapeHTML(country)}</strong> 的社宅定義摘要：${escapeHTML(joined)}`;
 }
@@ -999,13 +1015,13 @@ async function renderAiPage(container) {
           </div>
         </div>
 
-        <!-- 2) 輸入框（送出後才會顯示下方聊天紀錄） -->
+        <!-- 2) 輸入框 -->
         <form id="chatForm" class="chat-form">
           <textarea id="chatInput" placeholder="輸入你的問題，例如：\n- ${EXAMPLES[0]}\n- ${EXAMPLES[1]}"></textarea>
           <button type="submit" class="btn primary">送出</button>
         </form>
 
-        <!-- 3) 聊天紀錄（空的時候會被 CSS 隱藏） -->
+        <!-- 3) 聊天紀錄 -->
         <div class="chat-log" id="chatLog" aria-live="polite"></div>
       </div>
     </section>
@@ -1126,16 +1142,16 @@ async function aiQuery(question, context) {
     return mockAnswer(question);
   }
 
-  // 先試 /api/chat
+  // 直接打你的 /api/chat（你已在 Worker 新增真回答）
   try {
     const json = await apiFetch("/api/chat", { question, context, language: "zh-TW" });
     if (json?.ok && (json.answer || json.html)) {
       return (json.answer || stripHtml(json.html));
     }
   } catch (e1) {
-    // 再試 /api/report
+    // 回退 /api/report（很少會用到）
     try {
-      const json2 = await apiFetch("/api/report", { topic:"chat", mode:"free", question, language:"zh-TW", context });
+      const json2 = await apiFetch("/api/report", { topic:"chat", mode:"free", question, language:"zh", context });
       if (json2?.ok && (json2.answer || json2.html)) {
         return (json2.answer || stripHtml(json2.html));
       }
