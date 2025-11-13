@@ -1,9 +1,9 @@
 /* =================== AI 開關與後端位址 =================== */
-const ENABLE_AI = true;
-const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev";
+const ENABLE_AI = true; // 走真 AI（Cloudflare Worker）→ true；想先用本地規則摘要 → false
+const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址
 
-/* =================== 資料路徑（GitHub Raw CSV） - 全部使用 main =================== */
-const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_housing_definitions_clean_utf8.csv";
+/* =================== 資料路徑（GitHub Raw CSV） =================== */
+const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
 const CSV_ELIGIBILITY     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
 const CSV_REASSESSMENT    = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
 const CSV_PRIORITY        = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
@@ -15,24 +15,11 @@ const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
 function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
 function countryParam(name){ return encodeURIComponent(String(name||"").replace(/\s+/g," ").trim()); }
-function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
-function idxByAliases(headers, aliases){
-  const keys = headers.map(h => normKey(h));
-  for (const a of aliases){ const i = keys.indexOf(a); if (i !== -1) return i; }
-  return -1;
-}
-function normSearch(s){
-  return String(s||"")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g," ")
-    .trim();
-}
 
 /* CSV 解析（支援 BOM / 引號 / 逗號 / 換行） */
 function csvParse(text){
   if (!text) return [];
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // 去 BOM
   const rows=[]; let cur=[],cell="",inQ=false;
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
@@ -51,19 +38,38 @@ function csvParse(text){
   return rows;
 }
 
+/* 標頭正規化 & 欄位別名 */
+function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function idxByAliases(headers, aliases){
+  const keys = headers.map(h => normKey(h));
+  for (const a of aliases){ const i = keys.indexOf(a); if (i !== -1) return i; }
+  return -1;
+}
+
+/* 強韌搜尋：去重音/小寫/非字元換空白 */
+function normSearch(s){
+  return String(s||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
 /* =================== 路由 =================== */
 window.addEventListener("DOMContentLoaded", () => {
   ensureTopnavActive();
-  ensureAIModal();
+  ensureAIModal();      // 若 HTML 沒放 Modal，這裡會自動注入
   renderRoute();
   window.addEventListener("hashchange", () => { ensureTopnavActive(); renderRoute(); });
 });
+
 function ensureTopnavActive(){
   const m = (location.hash.replace(/^#\//,"") || "").split("?")[0] || "home";
   $$(".topnav .nav-link").forEach(a=>a.classList.remove("active"));
   const el = $(`.topnav .nav-link[data-route="${m}"]`);
   if(el) el.classList.add("active");
 }
+
 function renderRoute(){
   const hash = (location.hash || "#/").replace(/^#/, "");
   const main = $(".main-content"); if(!main) return;
@@ -77,6 +83,7 @@ function renderRoute(){
   else if(hash.startsWith("/ai"))           renderAIChat(main);
   else renderHome(main);
 }
+
 function getQueryParams(hash){
   const qIndex = hash.indexOf("?"); const out = {};
   if(qIndex === -1) return out;
@@ -95,8 +102,9 @@ const TOPICS = [
   { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
   { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",     available: true,  cta: "查看條件" },
   { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",     available: true,  cta: "查看特徵" },
-  { slug: "ai",              emoji: "🤖", title: "AI 對話（資料庫問答）", desc: "開放式提問：比較、摘要、差異與排名等", available: true,  cta: "開始對話" },
+  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "開放式詢問：比較、摘要與差異（使用本站資料）", available: true,  cta: "開始對話" },
 ];
+
 function renderHome(root){
   const wrap = document.createElement("section");
   wrap.className = "home fade-in";
@@ -158,39 +166,24 @@ async function renderDefinitions(root){
 async function loadDefinitions(){
   let text="";
   try{
-    console.log("[DEBUG] 開始載入 CSV_DEFINITIONS:", CSV_DEFINITIONS);
-    const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"}); 
-    console.log("[DEBUG] CSV 回應狀態:", resp.status, resp.statusText);
-    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch(CSV_DEFINITIONS,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
     text = await resp.text();
-    console.log("[DEBUG] CSV 文字長度:", text.length, "前100字:", text.substring(0,100));
-  }catch(err){ 
-    console.error("❌ Fetch CSV_DEFINITIONS failed:", err); 
-    DefState.data=[]; DefState.filtered=[]; 
-    return; 
-  }
+  }catch(err){ console.error("Fetch CSV_DEFINITIONS failed:", err); DefState.data=[]; DefState.filtered=[]; return; }
 
   const rows = csvParse(text);
-  console.log("[DEBUG] CSV 解析後行數:", rows.length);
   if(!rows.length){ DefState.data=[]; DefState.filtered=[]; return; }
 
   const headers = rows[0];
-  console.log("[DEBUG] CSV 標頭:", headers);
-  
   const iC = idxByAliases(headers, ["country"]);
   const iT = idxByAliases(headers, ["termsused","term(s)used","terms"]);
   const iD = idxByAliases(headers, ["definition","definitionandsummaryoverview","definitionoverview"]);
-
-  console.log("[DEBUG] 欄位索引 - Country:", iC, "Terms:", iT, "Definition:", iD);
 
   const raw = rows.slice(1).map(r=>{
     const Country=(r[iC]||"").trim(), TermsUsed=((iT>=0?r[iT]:"")||"").trim(), Definition=(iD>=0?(r[iD]||""):"").trim();
     if(!Country || !Definition) return null;
     const flags={}; TAG_RULES.forEach(rule=>flags[rule.key]=rule.regex.test(`${TermsUsed}\n${Definition}`));
-    return { Country, TermsUsed, Definition, short: shortText(Definition,200), flags };
+    return { Country, TermsUsed, Definition, short: shortText(Definition,230), flags };
   }).filter(Boolean);
-
-  console.log("[DEBUG] 有效資料筆數:", raw.length);
 
   const map = new Map();
   for(const it of raw){
@@ -204,8 +197,6 @@ async function loadDefinitions(){
     Country:g.Country, items:g.items, flagsCombined:g.flagsCombined, termsJoined:Array.from(g.termsSet).join("；")
   })).sort((a,b)=>a.Country.localeCompare(b.Country));
   DefState.filtered = DefState.data.slice();
-  
-  console.log("[DEBUG] 最終國家數:", DefState.data.length);
 }
 
 function buildDefControls(){
@@ -221,6 +212,7 @@ function buildDefControls(){
     applyDefFilters();
   });
 }
+
 function applyDefFilters(){
   const q=DefState.searchText.toLowerCase();
   DefState.filtered = DefState.data.filter(d=>{
@@ -234,40 +226,67 @@ function applyDefFilters(){
   });
   renderDefCards();
 }
+
+// 判斷卡片內容是否「長」，長才需要「展開全文」
+function isLongDefinition(group){
+  if (!group || !group.items || !group.items.length) return false;
+  const first = group.items[0]?.Definition || "";
+  const totalLen = group.items.reduce((s,it)=>s + (it.Definition?.length || 0), 0);
+  // 規則：第一則超過 280 字，或全部合計 > 500，或同國家定義超過 2 則 → 才顯示展開
+  return (first.length > 280) || (totalLen > 500) || (group.items.length > 2);
+}
+
 function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
   empty.style.display="none";
+
   wrap.innerHTML = DefState.filtered.map((d)=>{
-    const chips = TAG_RULES.filter(t=>d.flagsCombined[t.key]).slice(0,3).map(t=>`<span class="chip">${t.label}</span>`).join("");
-    const multiple = d.items.length>1;
-    const variants = d.items.map((it,i)=>`
+    const chips = TAG_RULES
+      .filter(t=>d.flagsCombined[t.key])
+      .slice(0,3)
+      .map(t=>`<span class="chip">${t.label}</span>`)
+      .join("");
+
+    const firstDef = d.items[0]?.Definition || "";
+    const showExpand = isLongDefinition(d);
+
+    // 摘要文字：長卡顯示短摘，短卡直接顯示全文（第一筆）
+    const summaryHTML = showExpand
+      ? escapeHTML(shortText(firstDef, 260))
+      : escapeHTML(firstDef);
+
+    // variant 區塊（只有長卡才插入，含所有定義）
+    const variants = showExpand ? d.items.map((it,i)=>`
       <div class="variant">
         <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
-      </div>`).join("");
-    const long = (d.items[0]?.Definition || "").length > 400;
+      </div>
+    `).join("") : "";
+
     return `
-      <article class="card def-card ${multiple?"multiple":""}">
+      <article class="card def-card">
         <div class="card-header">
           <div>
             <div class="country">${escapeHTML(d.Country)}</div>
             <div class="terms">${escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"))}</div>
           </div>
         </div>
-        <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
+
+        <div class="summary">${summaryHTML}</div>
+
         <div class="actions">
-          ${multiple?`<span class="badge">共 ${d.items.length} 個定義</span>`:""}
           <div class="chips">${chips}</div>
         </div>
 
-        ${long ? `
-        <div class="actions" style="margin-top:8px">
-          <button class="btn toggle">展開全文</button>
-        </div>
-        <div class="fulltext" style="display:none;">${variants}</div>` : ""}
+        ${showExpand ? `
+          <div class="actions">
+            <button class="btn toggle">展開全文</button>
+          </div>
+          <div class="fulltext" style="display:none;">${variants}</div>
+        ` : ""}
 
-        <div class="link-row" style="margin-top:10px">
+        <div class="actions link-row nowrap">
           <a class="btn" href="#/eligibility">→ 申請資格</a>
           <a class="btn" href="#/reassessment?country=${countryParam(d.Country)}">→ 再審查頻率</a>
           <a class="btn" href="#/priority?country=${countryParam(d.Country)}">→ 優先分配</a>
@@ -275,59 +294,29 @@ function renderDefCards(){
         </div>
 
         <div class="ai-row">
-          <button class="btn primary ai-sum" data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
+          <button class="btn primary ai-summary" data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
         </div>
       </article>`;
   }).join("");
 
+  // 只有存在 .toggle 才需要綁定展開事件（長卡）
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
-    if(btn){
-      const card = e.target.closest(".card");
-      const full = $(".fulltext",card);
-      const open = full.style.display!=="none";
-      full.style.display = open ? "none":"block";
-      btn.textContent = open ? "展開全文" : "收合全文";
-    }
+    if(!btn) return;
+    const card = e.target.closest(".card");
+    const full = $(".fulltext",card);
+    const open = full.style.display!=="none";
+    full.style.display = open ? "none":"block";
+    btn.textContent = open ? "展開全文" : "收合全文";
   };
 
-  wrap.querySelectorAll(".ai-sum").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
-      const country = btn.getAttribute("data-country") || "";
-      const card = btn.closest(".card");
-      await generateCardAISummary(card, country);
+  // 綁定 country 卡片上的「⚡ 產生 AI 摘要」
+  $$(".ai-summary", wrap).forEach(btn=>{
+    btn.addEventListener("click", async (ev)=>{
+      const country = ev.currentTarget.getAttribute("data-country") || "";
+      await generateCountryAISummary(country);
     });
   });
-}
-async function generateCardAISummary(cardEl, country){
-  ensureAIModal();
-  const modal = $("#ai-modal"); const body = $("#ai-body");
-  if (body) body.innerHTML = "產生中…";
-  if (modal) modal.style.display = "flex";
-
-  try{
-    const data = collectVisibleTableData();
-    const payload = {
-      topic: "definitions",
-      mode: "card",
-      language: "zh",
-      filters: { country, search: "", sort: "" },
-      data: { ...data, stats: computeYesShare(data) }
-    };
-    if (ENABLE_AI && AI_API_BASE) {
-      const resp = await fetch(`${AI_API_BASE}/api/report`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
-      });
-      const json = await resp.json();
-      if (!json.ok) throw new Error(json.error || "AI failed");
-      body.innerHTML = json.html || "（沒有內容）";
-    } else {
-      body.innerHTML = localSummarize("definitions", data);
-    }
-  }catch(e){
-    body.innerHTML = `AI 摘要失敗，已改用規則摘要。<br>${localSummarize("definitions", collectVisibleTableData())}`;
-  }
 }
 
 /* =================== 申請資格 =================== */
@@ -371,6 +360,7 @@ async function renderEligibility(root){
   bindEligibilityControls();
   renderEligibilityView();
 }
+
 async function loadEligibility(){
   let text=""; 
   try{
@@ -408,6 +398,7 @@ async function loadEligibility(){
     };
   }).filter(Boolean);
 }
+
 function bindEligibilityControls(){
   $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
   $("#eli_sort").addEventListener("change",renderEligibilityView);
@@ -417,6 +408,7 @@ function bindEligibilityControls(){
     const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search=""; EliState.quick={key:k,val:v}; renderEligibilityView();
   });
 }
+
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
@@ -432,6 +424,7 @@ function filterEligibility(data){
     return true;
   });
 }
+
 function sortEligibility(arr){
   const how=$("#eli_sort").value;
   if(how==="score"){
@@ -439,6 +432,7 @@ function sortEligibility(arr){
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderEligibilityView(){
   const mount=$("#eli_mount"), empty=$("#eli_empty");
   let data = filterEligibility(EliState.raw.slice()); sortEligibility(data);
@@ -521,6 +515,7 @@ async function renderReassessment(root, params={}){
   bindReassessmentControls();
   renderReassessmentTable();
 }
+
 async function loadReassessment(){
   let text="";
   try{
@@ -544,14 +539,17 @@ async function loadReassessment(){
   }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
+
 function bindReassessmentControls(){
   $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
   $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
 }
+
 function filterReassessment(d){
   const q=ReaState.search; if(!q) return d;
   return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].map(normSearch).join(" | ").includes(normSearch(q)));
 }
+
 function sortReassessment(arr){
   if(ReaState.sort==="freq"){
     const order=["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
@@ -559,6 +557,7 @@ function sortReassessment(arr){
     arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderReassessmentTable(){
   const mount=$("#rea_mount"), empty=$("#rea_empty");
   let data = filterReassessment(ReaState.raw.slice()); sortReassessment(data);
@@ -629,6 +628,7 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
+
 async function loadPriority(){
   let text="";
   try{
@@ -671,6 +671,7 @@ async function loadPriority(){
   }).filter(Boolean);
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
+
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -679,6 +680,7 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
+
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
@@ -694,12 +696,14 @@ function filterPriority(data){
     return true;
   });
 }
+
 function sortPriority(arr){
   if(PriState.sort==="score"){
     const score=d=>["Wait","Income","Dis","Eld","Asy","Eth","HH","Cond"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderPriorityTable(){
   const mount=$("#pri_mount"), empty=$("#pri_empty");
   let data = filterPriority(PriState.raw.slice()); sortPriority(data);
@@ -795,6 +799,7 @@ async function renderCharacteristics(root, params={}){
 
   renderCharacteristicsTable();
 }
+
 async function loadCharacteristics(){
   let text="";
   try{
@@ -837,10 +842,12 @@ async function loadCharacteristics(){
     };
   }).filter(Boolean);
 }
+
 function bindCharacteristicsControls(){
   $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
+
 function filterCharacteristics(data){
   const qRaw = ChaState.search;
   if(!qRaw) return data;
@@ -850,12 +857,14 @@ function filterCharacteristics(data){
     return hay.includes(q);
   });
 }
+
 function sortCharacteristics(arr){
   if(ChaState.sort==="score"){
     const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
+
 function renderCharacteristicsTable(){
   const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice");
   let data = filterCharacteristics(ChaState.raw.slice());
@@ -932,7 +941,7 @@ function pill(v){
   return `<span class="pill na">NA</span>`;
 }
 
-/* =================== AI Modal =================== */
+/* =================== AI Modal（定義卡片摘要用） =================== */
 function ensureAIModal(){
   if (document.getElementById("ai-modal")) return;
   const div = document.createElement("div");
@@ -942,276 +951,214 @@ function ensureAIModal(){
   div.innerHTML = `
     <div class="ai-modal-content">
       <div class="ai-modal-header">
-        <strong>AI Summary</strong>
+        <strong>AI 摘要</strong>
         <button id="ai-close" class="btn">✕</button>
       </div>
-      <div id="ai-body" class="ai-modal-body">Generating…</div>
+      <div id="ai-body" class="ai-modal-body">產生中…</div>
     </div>
   `;
   document.body.appendChild(div);
-  $("#ai-close").onclick = ()=> (div.style.display = "none");
+  $("#ai-close").onclick = () => (div.style.display = "none");
 }
 
-/* =================== 通用：收集表格資料 & YES 比例 =================== */
-function collectVisibleTableData() {
-  const table = document.querySelector(".matrix table");
-  if (!table) return { columns: [], rows: [] };
+/* =================== 定義卡片：單一國家「⚡ 產生 AI 摘要」 =================== */
+async function generateCountryAISummary(country){
+  try{
+    // 從 DefState 找到該國 rows
+    const group = DefState.data.find(d=>d.Country===country);
+    if(!group){ showAIModalHTML(`<p>找不到 ${escapeHTML(country)} 的資料。</p>`); return; }
 
-  const columns = Array.from(table.querySelectorAll("thead th")).map(th => th.textContent.trim());
-  const rows = Array.from(table.querySelectorAll("tbody tr")).map(tr => {
-    const cells = Array.from(tr.querySelectorAll("td")).map(td => td.innerText.trim());
-    const obj = {};
-    columns.forEach((col, i) => obj[col] = cells[i] ?? "");
-    return obj;
-  });
+    // 組 columns/rows（僅 definitions 三欄）
+    const columns = ["Country","TermsUsed","Definition"];
+    const rows = group.items.map(it=>[it.Country, it.TermsUsed || "", it.Definition || ""]);
 
-  return { columns, rows };
+    if (ENABLE_AI && AI_API_BASE){
+      showAIModalHTML("產生中…");
+      const payload = {
+        topic:"definitions",
+        mode:"country",
+        language:"zh-TW",
+        filters:{ country },
+        data:{ columns, rows, stats:{} }
+      };
+      const resp = await fetch(`${AI_API_BASE}/api/report`,{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await resp.json();
+      if(json.ok && json.html){
+        showAIModalHTML(json.html);
+      }else{
+        // fallback：本地規則
+        const html = localRulesSummaryCountry(country, columns, rows);
+        showAIModalHTML(html || "<p>AI 摘要失敗，且無本地資料可用。</p>");
+      }
+    }else{
+      const html = localRulesSummaryCountry(country, columns, rows);
+      showAIModalHTML(html);
+    }
+  }catch(e){
+    showAIModalHTML(`<p>產生失敗：${escapeHTML(e.message)}</p>`);
+  }
 }
-function computeYesShare(data) {
-  const stats = { yesShareByField: {} };
-  const rows = data.rows || [];
-  const cols = data.columns || [];
-  cols.forEach((col) => {
-    const vals = rows.map(r => String(r[col] || "").toUpperCase());
-    const yes = vals.filter(v => v.includes("YES")).length;
-    const yesNo = vals.filter(v => v.includes("YES") || v.includes("NO")).length;
-    if (yesNo > 0) stats.yesShareByField[col] = +(yes / yesNo).toFixed(2);
-  });
-  return stats;
+
+function showAIModalHTML(html){
+  ensureAIModal();
+  const modal = $("#ai-modal"), body=$("#ai-body");
+  if(body) body.innerHTML = html;
+  if(modal) modal.style.display = "flex";
 }
 
-/* =================== 本地規則摘要（fallback） =================== */
-function localSummarize(topic, data) {
-  const { columns, rows } = data || {};
-  if (!rows || !rows.length) return "<p>目前沒有可見的表格可整理。</p>";
-
-  const pickRow = rows[0];
-  const html = `
-    <p><strong>概覽：</strong>此為本頁可見表格的快速整理。</p>
-    <ul>
-      ${Object.keys(pickRow).slice(0,6).map(k=>`<li><strong>${escapeHTML(k)}：</strong>${escapeHTML(pickRow[k])}</li>`).join("")}
-    </ul>`;
-  return html;
+function localRulesSummaryCountry(country, columns, rows){
+  const iC = 0, iT = 1, iD = 2;
+  const defs = rows.filter(r=>r[iC]===country && r[iD]).slice(0,5);
+  if(!defs.length) return `<p><strong>${escapeHTML(country)}</strong>：無摘要可用</p>`;
+  const bullets = defs.map((d,i)=>{
+    const parts=[];
+    if(d[iT]) parts.push(`【名詞】${escapeHTML(d[iT])}`);
+    if(d[iD]) parts.push(`【定義】${escapeHTML(shortText(d[iD],420))}`);
+    return `<li>#${i+1}${parts.join("；")}</li>`;
+  }).join("");
+  return `<p><strong>${escapeHTML(country)} 的社會住宅：名詞與定義</strong></p><ul>${bullets}</ul>`;
 }
 
 /* =================== 🤖 AI 對話頁 =================== */
-let CHAT_DATA = null;
-
-async function loadAllDatasetsForChat(){
-  if (CHAT_DATA) return CHAT_DATA;
-
-  console.log("[AI Chat] 開始載入所有資料集...");
-
-  // 1) 定義
-  const defTxt = await (await fetch(CSV_DEFINITIONS,{cache:"no-store"})).text();
-  const defRows = csvParse(defTxt); const dh = defRows[0]||[];
-  const diC = idxByAliases(dh, ["country"]);
-  const diT = idxByAliases(dh, ["termsused","term(s)used","terms"]);
-  const diD = idxByAliases(dh, ["definition","definitionandsummaryoverview","definitionoverview"]);
-  const definitions = defRows.slice(1).map(r=>{
-    const Country=(r[diC]||"").trim(), Terms=(diT>=0?(r[diT]||""):"").trim(), Definition=(diD>=0?(r[diD]||""):"").trim();
-    if(!Country||!Definition) return null;
-    return { country:Country, terms:Terms, definition:Definition };
-  }).filter(Boolean);
-
-  console.log("[AI Chat] Definitions 載入:", definitions.length, "筆");
-
-  // 2) 申請資格
-  const eliTxt = await (await fetch(CSV_ELIGIBILITY,{cache:"no-store"})).text();
-  const eliRows = csvParse(eliTxt); const eh=eliRows[0]||[];
-  const ec = idxByAliases(eh,["country"]);
-  const eAll = idxByAliases(eh,["alleligible","allareeligible","all"]);
-  const eInc = idxByAliases(eh,["incomethreshold","income"]);
-  const ePR  = idxByAliases(eh,["citizenshiporpr","citizenshippermresidency","citizenship","permresidency"]);
-  const eRes = idxByAliases(eh,["localresidency","residency","local"]);
-  const eEmp = idxByAliases(eh,["employment"]);
-  const eNote= idxByAliases(eh,["othernotes","notes","note"]);
-  const eligibility = eliRows.slice(1).map(r=>{
-    const c=(r[ec]||"").trim(); if(!c) return null;
-    return { country:c, all:(r[eAll]||"").trim(), income:(r[eInc]||"").trim(), pr:(r[ePR]||"").trim(), residency:(r[eRes]||"").trim(), employment:(r[eEmp]||"").trim(), note:(r[eNote]||"").trim() };
-  }).filter(Boolean);
-
-  console.log("[AI Chat] Eligibility 載入:", eligibility.length, "筆");
-
-  // 3) 再審查
-  const reaTxt = await (await fetch(CSV_REASSESSMENT,{cache:"no-store"})).text();
-  const reaRows = csvParse(reaTxt); const rh=reaRows[0]||[];
-  const rc = idxByAliases(rh,["country"]);
-  const rseg= idxByAliases(rh,["segment","scheme","program"]);
-  const rfr = idxByAliases(rh,["standardizedfrequency","frequency","freq","reassessmentfrequency"]);
-  const rdet= idxByAliases(rh,["detail","notes","othernotes","remark","remarks"]);
-  const reassessment = reaRows.slice(1).map(r=>{
-    const c=(r[rc]||"").trim(); if(!c) return null;
-    return { country:c, segment:(r[rseg]||"").trim(), frequency:(r[rfr]||"").trim(), detail:(r[rdet]||"").trim() };
-  }).filter(Boolean);
-
-  console.log("[AI Chat] Reassessment 載入:", reassessment.length, "筆");
-
-  // 4) 優先分配
-  const priTxt = await (await fetch(CSV_PRIORITY,{cache:"no-store"})).text();
-  const priRows = csvParse(priTxt); const ph=priRows[0]||[];
-  const pc = idxByAliases(ph,["country"]);
-  const pWait=idxByAliases(ph,["timeonwaitinglist","waitinglist","wait"]);
-  const pInc =idxByAliases(ph,["incomelevel","income"]);
-  const pDis =idxByAliases(ph,["disability","disabled"]);
-  const pEld =idxByAliases(ph,["elderly","older","senior"]);
-  const pAsy =idxByAliases(ph,["asylumseekers","asylum"]);
-  const pEth =idxByAliases(ph,["ethnicorracialminority","ethnicminority","racialminority","minority"]);
-  const pHH  =idxByAliases(ph,["householdcompositionorsize","householdsize","householdcomposition"]);
-  const pCond=idxByAliases(ph,["currenthousingconditions","housingconditions","currenthousing"]);
-  const pNote=idxByAliases(ph,["othernotes","notes","note"]);
-  const priority = priRows.slice(1).map(r=>{
-    const c=(r[pc]||"").trim(); if(!c) return null;
-    return { country:c, waiting:(r[pWait]||"").trim(), income:(r[pInc]||"").trim(), disability:(r[pDis]||"").trim(), elderly:(r[pEld]||"").trim(), asylum:(r[pAsy]||"").trim(), ethnic:(r[pEth]||"").trim(), hhsize:(r[pHH]||"").trim(), condition:(r[pCond]||"").trim(), note:(r[pNote]||"").trim() };
-  }).filter(Boolean);
-
-  console.log("[AI Chat] Priority 載入:", priority.length, "筆");
-
-  // 5) 特徵
-  const chaTxt = await (await fetch(CSV_CHARACTERISTICS,{cache:"no-store"})).text();
-  const chaRows = csvParse(chaTxt); const ch=chaRows[0]||[];
-  const cc=idxByAliases(ch,["country"]);
-  const cMB=idxByAliases(ch,["rentsettingmarketbased","marketbased"]);
-  const cCB=idxByAliases(ch,["rentsettingcostbased","costbased"]);
-  const cIB=idxByAliases(ch,["rentsettingincomebased","incomebased"]);
-  const cUB=idxByAliases(ch,["rentsettingutilitybased","utilitybased"]);
-  const cReg=idxByAliases(ch,["rentincreaseregular","rentincreasereg"]);
-  const cNot=idxByAliases(ch,["rentincreasenotregular","rentincreasenonregular","notregular"]);
-  const cPct=idxByAliases(ch,["socialrentpctofmarket","socialrentpercentagemarket","socialrentshareofmarket","pct"]);
-  const cBuy=idxByAliases(ch,["sittingtenantrighttobuynorm","righttobuynorm","righttobuy"]);
-  const cNote=idxByAliases(ch,["sittingtenantrighttobuynotes","righttobuynotes","notes","othernotes"]);
-  const characteristics = chaRows.slice(1).map(r=>{
-    const c=(r[cc]||"").trim(); if(!c) return null;
-    return { country:c, market:(r[cMB]||"").trim(), cost:(r[cCB]||"").trim(), income:(r[cIB]||"").trim(), utility:(r[cUB]||"").trim(), incReg:(r[cReg]||"").trim(), incNot:(r[cNot]||"").trim(), pct:(r[cPct]||"").trim(), buy:(r[cBuy]||"").trim(), note:(r[cNote]||"").trim() };
-  }).filter(Boolean);
-
-  console.log("[AI Chat] Characteristics 載入:", characteristics.length, "筆");
-
-  CHAT_DATA = { definitions, eligibility, reassessment, priority, characteristics };
-  console.log("[AI Chat] 所有資料載入完成！");
-  return CHAT_DATA;
-}
-
 function renderAIChat(root){
   const sec = document.createElement("section");
-  sec.id = "ai";
+  sec.className = "ai-card fade-in";
   sec.innerHTML = `
-    <div class="ai-card fade-in">
-      <div class="ai-title">🤖 AI 對話（資料庫問答）</div>
-      <div class="ai-sub">這裡可以詢問關於本資料庫的開放式問題：機制比較、各國摘要與差異等。由 AI 機器人替您摘錄數據庫重點回覆。</div>
+    <div class="ai-title">🤖 AI 對話</div>
+    <div class="ai-sub">這裡可以詢問關於本資料庫的開放式問題：機制比較、各國摘要與差異等。由 AI 替您摘錄數據庫重點回覆。</div>
 
-      <div class="ai-quick" id="aiQuick"></div>
+    <!-- 1) 快速提問（點一下帶入輸入框） -->
+    <div class="ai-quick" id="aiQuickRow">
+      ${[
+        "請幫我總結 荷蘭 的社宅定義與重點制度。",
+        "日本 與 德國 在「優先分配」是否都有針對長者？",
+        "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
+        "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+      ].map(q=>`<button class="chip" data-q="${escapeHTML(q)}">${escapeHTML(q)}</button>`).join("")}
+    </div>
 
-      <div class="ai-input">
-        <textarea id="aiQ" placeholder="請輸入你的問題（例如：請幫我總結 荷蘭 的社宅定義與重點制度。）"></textarea>
-        <button id="aiSend" class="btn primary">送出</button>
+    <!-- 2) 輸入框 -->
+    <div class="ai-input">
+      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與再審查差異」"></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="aiSend"   class="btn primary">送出</button>
+        <button id="aiHealth" class="btn">測試連線</button>
       </div>
+    </div>
 
-      <div class="ai-chat-log" id="aiLog"></div>
-      <div class="ai-actions"><span id="aiStatus" class="status"></span></div>
+    <!-- 3) 聊天紀錄 -->
+    <div class="ai-chat-log" id="aiLog">
+      <div class="ai-msg assistant">
+        <div class="who">AI</div>
+        <div class="bubble">嗨！我可以根據本網站的資料庫，幫你做跨國比較與摘要。可直接點上面的快速提問，或自行輸入問題。</div>
+      </div>
+    </div>
+
+    <div class="ai-actions">
+      <span class="status" id="aiStatus">就緒</span>
     </div>
   `;
   root.appendChild(sec);
 
-  const tips = [
-    "請幫我總結 荷蘭 的社宅定義與重點制度。",
-    "日本 與 德國 在「優先分配」是否都有針對長者？",
-    "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
-    "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
-  ];
-  $("#aiQuick").innerHTML = tips.map(t=>`<button class="chip" data-q="${escapeHTML(t)}">${escapeHTML(t)}</button>`).join("");
-  $("#aiQuick").addEventListener("click", (e)=>{
-    const b = e.target.closest(".chip"); if(!b) return;
-    $("#aiQ").value = b.dataset.q || "";
-    $("#aiQ").focus();
+  const $I = (sel) => sec.querySelector(sel);
+
+  // 快速提問 → 帶入輸入框
+  $I("#aiQuickRow").addEventListener("click",(e)=>{
+    const btn = e.target.closest("button.chip");
+    if(!btn) return;
+    const q = btn.dataset.q || "";
+    const ta = $I("#aiInput");
+    ta.value = q;
+    ta.focus();
+    ta.scrollIntoView({behavior:"smooth", block:"center"});
   });
 
-  loadAllDatasetsForChat().catch(()=>{});
+  // 測試健康檢查
+  $I("#aiHealth").onclick = async ()=>{
+    setStatus("測試連線中…");
+    try{
+      const r = await fetch(`${AI_API_BASE}/api/health`, { method:"GET" });
+      const ok = r.ok ? "成功" : `失敗(${r.status})`;
+      pushAssistant(`<p>健康檢查：${ok}</p>`);
+      setStatus("就緒");
+    }catch(e){
+      pushAssistant(`<p>健康檢查失敗：${escapeHTML(e.message)}</p>`);
+      setStatus("就緒");
+    }
+  };
 
-  $("#aiSend").addEventListener("click", ()=> aiAsk());
-  $("#aiQ").addEventListener("keydown",(e)=>{ if(e.key==="Enter" && (e.ctrlKey||e.metaKey)) aiAsk(); });
-
-  async function aiAsk(){
-    const q = ($("#aiQ").value||"").trim();
-    if(!q) return;
-    appendMsg("user", q);
-    $("#aiQ").value = "";
-    setStatus("思考中…");
+  // 送出問題
+  $I("#aiSend").onclick = async ()=>{
+    const q = ($I("#aiInput").value || "").trim();
+    if(!q){ $I("#aiInput").focus(); return; }
+    pushUser(q);
+    $I("#aiInput").value = "";
+    setStatus("分析中…");
 
     try{
-      const datasets = await loadAllDatasetsForChat();
-      console.log("[AI Ask] 資料集已載入:", datasets);
-
       const payload = {
-        topic:"chat",
-        mode:"qa",
-        language:"zh",
-        question:q,
-        data: datasets  // 直接傳送 datasets
+        question: q,
+        language: "zh-TW",
+        context: {
+          sources: {
+            definitions:     CSV_DEFINITIONS,
+            eligibility:     CSV_ELIGIBILITY,
+            reassessment:    CSV_REASSESSMENT,
+            priority:        CSV_PRIORITY,
+            characteristics: CSV_CHARACTERISTICS
+          }
+        }
       };
-
-      console.log("[AI Ask] 傳送 payload:", payload);
-
-      let html = "";
-      if (ENABLE_AI && AI_API_BASE){
-        const r = await fetch(`${AI_API_BASE}/api/report`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify(payload)
-        });
-        const j = await r.json();
-        console.log("[AI Ask] 收到回應:", j);
-        if (!j.ok) throw new Error(j.error || "AI failed");
-        html = j.html || "（沒有內容）";
+      const resp = await fetch(`${AI_API_BASE}/api/chat`, {
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      const json = await resp.json();
+      if(json.ok && (json.html || json.answer)){
+        pushAssistant(json.html || escapeHTML(json.answer));
       }else{
-        html = `<p>（示範回答）已收到你的問題：「${escapeHTML(q)}」。</p>`;
+        pushAssistant(`<p>抱歉，回覆失敗了：${escapeHTML(json.error || ("HTTP "+resp.status))}</p>`);
       }
-      appendMsg("assistant", html, true);
-      setStatus("");
     }catch(e){
-      console.error("[AI Ask] 錯誤:", e);
-      appendMsg("assistant", `<p>抱歉，回覆失敗了：${e.message}</p>`, true);
-      setStatus("");
+      pushAssistant(`<p>抱歉，回覆失敗了：${escapeHTML(e.message)}</p>`);
+    }finally{
+      setStatus("就緒");
     }
-  }
-  function appendMsg(role, content, isHTML=false){
-    const log=$("#aiLog");
-    const item = document.createElement("div");
-    item.className = `ai-msg ${role}`;
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = role==="assistant" ? "AI" : "You";
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    if(isHTML) bubble.innerHTML = content;
-    else bubble.textContent = content;
-    item.appendChild(avatar);
-    item.appendChild(bubble);
-    log.appendChild(item);
+  };
+
+  // Ctrl/Cmd+Enter 送出
+  $I("#aiInput").addEventListener("keydown",(e)=>{
+    if((e.metaKey || e.ctrlKey) && e.key === "Enter"){
+      e.preventDefault();
+      $I("#aiSend").click();
+    }
+  });
+
+  function setStatus(t){ const s=$I("#aiStatus"); if(s) s.textContent=t; }
+  function pushUser(text){
+    const log = $I("#aiLog");
+    log.insertAdjacentHTML("beforeend", `
+      <div class="ai-msg user">
+        <div class="who">我</div>
+        <div class="bubble">${escapeHTML(text).replace(/\n/g,"<br>")}</div>
+      </div>
+    `);
     log.scrollTop = log.scrollHeight;
   }
-  function setStatus(t){ const s=$("#aiStatus"); if(s) s.textContent = t||""; }
+  function pushAssistant(html){
+    const log = $I("#aiLog");
+    log.insertAdjacentHTML("beforeend", `
+      <div class="ai-msg assistant">
+        <div class="who">AI</div>
+        <div class="bubble">${html}</div>
+      </div>
+    `);
+    log.scrollTop = log.scrollHeight;
+  }
 }
 
-/* ====== AI 對話頁面樣式最小補丁（如果 styles.css 已含，這段無影響） ====== */
-(function injectBasicAICSS(){
-  if (document.getElementById("ai-inline-style")) return;
-  const css = document.createElement("style");
-  css.id="ai-inline-style";
-  css.textContent = `
-  .ai-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 6px 18px rgba(2,132,199,.10);padding:14px}
-  .ai-title{font-weight:800;font-size:18px}
-  .ai-sub{color:#334155;font-size:13px;margin:6px 0 10px}
-  .ai-quick{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
-  .ai-input{display:flex;gap:8px;align-items:flex-start}
-  .ai-input textarea{flex:1;min-height:110px;padding:10px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px}
-  .ai-chat-log{margin-top:12px;max-height:60vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
-  .ai-msg{display:flex;gap:8px}
-  .ai-msg.user{justify-content:flex-end}
-  .ai-msg .avatar{flex:0 0 auto;width:28px;height:28px;border-radius:999px;background:#e2e8f0;color:#0f172a;font-weight:700;display:flex;align-items:center;justify-content:center}
-  .ai-msg.user .avatar{background:#3b82f6;color:#fff}
-  .ai-msg .bubble{max-width:min(720px,80%);padding:10px 12px;border-radius:14px;background:#f8fafc;border:1px solid #e2e8f0}
-  .ai-msg.user .bubble{background:#dbeafe;border-color:#bfdbfe}
-  .chip{background:#ecfeff;border:1px solid rgba(14,165,165,.35);color:#0b8d8d;font-weight:600;border-radius:999px;padding:4px 8px;font-size:12px;cursor:pointer}
-  `;
-  document.head.appendChild(css);
-})();
+/* =================== 結束 =================== */
