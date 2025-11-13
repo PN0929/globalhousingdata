@@ -103,34 +103,56 @@ section{ margin-bottom: var(--section-gap); }
 .btn.primary:hover{background:var(--brand-700)}
 
 /* =============== Cards grid（definitions 等） =============== */
-.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.cards{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:14px;
+  max-width:100%;
+  overflow-x:hidden;
+}
 @media (max-width:1100px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:680px){.cards{grid-template-columns:1fr}}
+
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-  padding:14px;box-shadow:var(--shadow-sm);transition:transform .12s,box-shadow .12s,border-color .12s
+  padding:14px;box-shadow:var(--shadow-sm);transition:transform .12s,box-shadow .12s,border-color .12s;
+  max-width:100%;min-width:0;
 }
 .card:hover{transform:translateY(-2px);border-color:rgba(37,99,235,.35);box-shadow:var(--shadow)}
 .card-header{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:6px}
+.card-header > *{ min-width:0; } /* 允許內容縮小避免撐爆 */
 .country{font-weight:800;color:var(--ink);font-size:16.5px}
-.terms{color:var(--accent-700);font-weight:600;font-size:13px;margin-bottom:6px}
-.summary{color:var(--ink-2);font-size:13.5px;line-height:1.75}
+.terms{color:var(--accent-700);font-weight:600;font-size:13px;margin-bottom:6px;overflow-wrap:anywhere}
+.summary{color:var(--ink-2);font-size:13.5px;line-height:1.75;overflow-wrap:anywhere}
 .actions{display:flex;gap:8px;align-items:center;margin-top:10px}
 .chip{background:var(--brand-50);border:1px solid rgba(14,165,165,.35);color:#0b8d8d;font-weight:600;border-radius:999px;padding:4px 8px;font-size:12px}
 .badge{display:inline-block;font-size:12px;padding:4px 8px;border-radius:999px;background:#ecfeff;color:#0b8d8d;border:1px solid rgba(14,165,165,.35)}
-.fulltext{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);color:var(--ink-2);font-size:14px}
+.fulltext{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);color:var(--ink-2);font-size:14px;overflow-x:hidden}
 .variant{margin-top:8px;padding:10px;border:1px dashed var(--line);border-radius:10px;background:#fff}
 .variant-header{font-size:13px;font-weight:700;color:var(--accent-700);margin-bottom:6px;display:flex;align-items:center;gap:6px}
 .vindex{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:999px;background:#eff6ff;color:#2563eb;font-size:12px;border:1px solid rgba(37,99,235,.25)}
-.variant-body{font-size:14px;color:var(--ink-2)}
+.variant-body{font-size:14px;color:var(--ink-2);overflow-wrap:anywhere}
 
 /* 定義卡：底部行為＆排版微調 */
 .def-card .summary{ font-size:14.5px; line-height:1.75; }
 .link-row{
-  display:flex; gap:8px; align-items:center;
-  flex-wrap:nowrap; overflow:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px;
+  display:flex;
+  flex-wrap:wrap;         /* 允許換行 */
+  gap:8px;
+  overflow:visible;       /* 不要水平卷軸 */
+  padding-bottom:0;
+  row-gap:10px;           /* 兩行間距 */
 }
-.link-row .btn{ white-space:nowrap; }
+.link-row .btn{
+  flex:1 1 calc(50% - 8px); /* 每行兩顆，平均寬 */
+  white-space:nowrap;
+  text-align:center;
+}
+@media (max-width:360px){
+  .link-row .btn{ flex:1 1 100%; } /* 超窄螢幕一行一顆，保險 */
+}
+
+/* AI 摘要按鈕獨立一行鋪滿 */
 .ai-row{ margin-top:8px; display:flex; }
 .ai-row .btn{ width:100%; justify-content:center; }
 
@@ -249,7 +271,7 @@ section{ margin-bottom: var(--section-gap); }
 .ai-msg.assistant .who{background:#eef2ff;color:#3730a3;border-color:#c7d2fe}
 .ai-msg .bubble{
   background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;
-  line-height:1.75;font-size:14.5px;color:var(--ink-2);max-width:100%
+  line-height:1.75;font-size:14.5px;color:var(--ink-2);max-width:100%;overflow-wrap:anywhere
 }
 .ai-msg .bubble p{margin:6px 0}
 .ai-msg .bubble ul{margin:6px 0 6px 18px}
@@ -262,107 +284,3 @@ section{ margin-bottom: var(--section-gap); }
 /* =============== 動畫/雜項 =============== */
 .fade-in{animation:fade .24s ease}
 @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-/* ===== HOTFIX: 全站左右對齊 & 區塊留白，強制覆蓋 ===== */
-:root{
-  --page-x: 22px;
-}
-@media (max-width: 680px){
-  :root{ --page-x: 14px; }
-}
-
-/* 容器置中與最大寬度（保險） */
-.container{
-  max-width: 1200px !important;
-  margin: 0 auto !important;
-}
-
-/* Header / Main / Footer 左右邊距一致 */
-header{
-  padding-left: var(--page-x) !important;
-  padding-right: var(--page-x) !important;
-}
-.main-content{
-  padding-left: var(--page-x) !important;
-  padding-right: var(--page-x) !important;
-  margin-top: 18px !important; /* 主內容與 header 之間留白 */
-}
-footer{
-  padding-left: var(--page-x) !important;
-  padding-right: var(--page-x) !important;
-  margin-top: 18px !important; /* 底部留白 */
-}
-
-/* 主要 section 之間一致留白 */
-section{
-  margin-bottom: 18px !important;
-}
-
-/* 卡片/表格區塊與前面控制列的間距保險 */
-.cards{
-  margin-top: 12px !important;
-}
-.matrix{
-  margin-top: 12px !important;
-}
-
-/* 定義卡底部四個導覽按鈕在同一行（保險） */
-.link-row{
-  flex-wrap: nowrap !important;
-  overflow-x: auto !important;
-}
-.link-row .btn{
-  white-space: nowrap !important;
-}
-/* ===== HOTFIX: 定義卡片右側超出修復 ===== */
-
-/* 1) 保證卡片與網格不會超出容器 */
-.cards{ max-width:100% !important; overflow-x:hidden !important; }
-.cards .card{ max-width:100% !important; min-width:0 !important; }
-
-/* 2) flex 內層（標題/用語區）允許縮小，否則長字會把容器撐寬 */
-.def-card .card-header > *{ min-width:0 !important; }
-
-/* 3) 長字串全部允許斷行；任何語言都能在任意位置換行 */
-.def-card .summary,
-.def-card .terms,
-.def-card .variant-body,
-.def-card .fulltext,
-.def-card .chips,
-.def-card .actions,
-.def-card .link-row {
-  overflow-wrap:anywhere !important; /* 現代瀏覽器最佳 */
-  word-break:break-word !important;   /* 後備保險 */
-}
-
-/* 4) 展開全文的內容區也避免水平捲動 */
-.def-card .fulltext{ overflow-x:hidden !important; }
-
-/* 5) 底部連結列保持同一行，但若內容太長仍不撐寬卡片 */
-.def-card .link-row{
-  flex-wrap:nowrap !important;
-  overflow-x:auto !important;      /* 需要時可左右滑動 */
-  -webkit-overflow-scrolling:touch;
-}
-.def-card .link-row .btn{ white-space:nowrap !important; }
-/* === HOTFIX: 定義卡片底部四個連結分兩行（每行兩顆） === */
-.def-card .link-row{
-  display:flex !important;
-  flex-wrap:wrap !important;     /* 允許換行 */
-  gap:8px !important;
-  overflow:visible !important;   /* 不要出現橫向卷軸 */
-  padding-bottom:0 !important;
-}
-
-.def-card .link-row .btn{
-  flex:1 1 calc(50% - 8px) !important;  /* 每行兩顆，平均寬 */
-  white-space:nowrap !important;        /* 文字本身不斷詞 */
-  text-align:center !important;
-}
-
-/* 超窄螢幕時保險：若四顆塞不下，仍會斷到兩行，但不會把卡片撐寬 */
-@media (max-width: 360px){
-  .def-card .link-row .btn{
-    flex:1 1 100% !important; /* 每顆獨佔一行（最保險） */
-  }
-}
-.def-card .link-row { row-gap: 10px !important; }
