@@ -15,9 +15,6 @@ const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
 function escapeHTML(s){ return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
 function shortText(s,n=180){ if(!s)return""; const c=s.replace(/\s+/g," ").trim(); if(c.length<=n)return c; const cut=c.slice(0,n); const d=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("。")); return (d>60?cut.slice(0,d+1):cut+"…"); }
 function countryParam(name){ return encodeURIComponent(String(name||"").replace(/\s+/g," ").trim()); }
-// 🔧 Hotfix: 暫時不要清除國名（避免連動渲染壞掉）
-function cleanCountryName(s){ return String(s || "").trim(); }
-
 function normKey(s){ return String(s||"").replace(/^\uFEFF/,"").toLowerCase().replace(/[^a-z0-9]/g,""); }
 function idxByAliases(headers, aliases){
   const keys = headers.map(h => normKey(h));
@@ -25,10 +22,14 @@ function idxByAliases(headers, aliases){
   return -1;
 }
 function normSearch(s){
-  return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  return String(s||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
 }
 
-/* CSV 解析 */
+/* CSV 解析（支援 BOM / 引號 / 逗號 / 換行） */
 function csvParse(text){
   if (!text) return [];
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
@@ -67,6 +68,7 @@ function renderRoute(){
   const hash = (location.hash || "#/").replace(/^#/, "");
   const main = $(".main-content"); if(!main) return;
   main.innerHTML = "";
+
   if(hash.startsWith("/definitions"))       renderDefinitions(main);
   else if(hash.startsWith("/eligibility"))  renderEligibility(main);
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
@@ -202,7 +204,6 @@ function buildDefControls(){
     applyDefFilters();
   });
 }
-
 function applyDefFilters(){
   const q=DefState.searchText.toLowerCase();
   DefState.filtered = DefState.data.filter(d=>{
@@ -216,7 +217,6 @@ function applyDefFilters(){
   });
   renderDefCards();
 }
-
 function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
@@ -282,7 +282,6 @@ function renderDefCards(){
     });
   });
 }
-
 async function generateCardAISummary(cardEl, country){
   ensureAIModal();
   const modal = $("#ai-modal"); const body = $("#ai-body");
@@ -355,7 +354,6 @@ async function renderEligibility(root){
   bindEligibilityControls();
   renderEligibilityView();
 }
-
 async function loadEligibility(){
   let text=""; 
   try{
@@ -393,7 +391,6 @@ async function loadEligibility(){
     };
   }).filter(Boolean);
 }
-
 function bindEligibilityControls(){
   $("#eli_search").addEventListener("input",e=>{EliState.search=e.target.value.trim().toLowerCase(); renderEligibilityView();});
   $("#eli_sort").addEventListener("change",renderEligibilityView);
@@ -403,7 +400,6 @@ function bindEligibilityControls(){
     const [k,v]=t.dataset.q.split(":"); const sel=$("#eli_search"); sel.value=""; EliState.search=""; EliState.quick={key:k,val:v}; renderEligibilityView();
   });
 }
-
 function filterEligibility(data){
   const q = EliState.search; const quick = EliState.quick;
   return data.filter(d=>{
@@ -419,7 +415,6 @@ function filterEligibility(data){
     return true;
   });
 }
-
 function sortEligibility(arr){
   const how=$("#eli_sort").value;
   if(how==="score"){
@@ -427,7 +422,6 @@ function sortEligibility(arr){
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderEligibilityView(){
   const mount=$("#eli_mount"), empty=$("#eli_empty");
   let data = filterEligibility(EliState.raw.slice()); sortEligibility(data);
@@ -510,7 +504,6 @@ async function renderReassessment(root, params={}){
   bindReassessmentControls();
   renderReassessmentTable();
 }
-
 async function loadReassessment(){
   let text="";
   try{
@@ -534,17 +527,14 @@ async function loadReassessment(){
   }).filter(Boolean);
   if(ReaState.preselectCountry){ ReaState.search=ReaState.preselectCountry.toLowerCase(); const input=$("#rea_search"); if(input) input.value=ReaState.preselectCountry; }
 }
-
 function bindReassessmentControls(){
   $("#rea_search").addEventListener("input",e=>{ReaState.search=e.target.value.trim().toLowerCase(); renderReassessmentTable();});
   $("#rea_sort").addEventListener("change",e=>{ReaState.sort=e.target.value; renderReassessmentTable();});
 }
-
 function filterReassessment(d){
   const q=ReaState.search; if(!q) return d;
   return d.filter(x=>[x.c,x.seg,x.cn,x.freq,x.detail].map(normSearch).join(" | ").includes(normSearch(q)));
 }
-
 function sortReassessment(arr){
   if(ReaState.sort==="freq"){
     const order=["Annually","Every 6 months","Bi-annually","Continuous review","Lease-end / ad hoc","At lease expiration (usually every 3 years)","Every 5 years","Varies (typically every 3 years)","Depends on local management","Re-assessed (timing unspecified)","Yes (unspecified)","No regular reassessment","NA"];
@@ -552,7 +542,6 @@ function sortReassessment(arr){
     arr.sort((a,b)=>score(a.freq)-score(b.freq)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderReassessmentTable(){
   const mount=$("#rea_mount"), empty=$("#rea_empty");
   let data = filterReassessment(ReaState.raw.slice()); sortReassessment(data);
@@ -623,7 +612,6 @@ async function renderPriority(root, params={}){
   bindPriorityControls();
   renderPriorityTable();
 }
-
 async function loadPriority(){
   let text="";
   try{
@@ -666,7 +654,6 @@ async function loadPriority(){
   }).filter(Boolean);
   if(PriState.preselectCountry){ PriState.search=PriState.preselectCountry.toLowerCase(); const input=$("#pri_search"); if(input) input.value=PriState.preselectCountry; }
 }
-
 function bindPriorityControls(){
   $("#pri_search").addEventListener("input",e=>{PriState.search=e.target.value.trim().toLowerCase(); renderPriorityTable();});
   $("#pri_sort").addEventListener("change",e=>{PriState.sort=e.target.value; renderPriorityTable();});
@@ -675,7 +662,6 @@ function bindPriorityControls(){
     const [k,v]=t.dataset.q.split(":"); PriState.quick={key:k,val:v}; $("#pri_search").value=""; PriState.search=""; renderPriorityTable();
   });
 }
-
 function filterPriority(data){
   const q=PriState.search, quick=PriState.quick;
   return data.filter(d=>{
@@ -691,14 +677,12 @@ function filterPriority(data){
     return true;
   });
 }
-
 function sortPriority(arr){
   if(PriState.sort==="score"){
     const score=d=>["Wait","Income","Dis","Eld","Asy","Eth","HH","Cond"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderPriorityTable(){
   const mount=$("#pri_mount"), empty=$("#pri_empty");
   let data = filterPriority(PriState.raw.slice()); sortPriority(data);
@@ -794,7 +778,6 @@ async function renderCharacteristics(root, params={}){
 
   renderCharacteristicsTable();
 }
-
 async function loadCharacteristics(){
   let text="";
   try{
@@ -828,7 +811,7 @@ async function loadCharacteristics(){
       MB:get(col.MB,"NA"),
       CB:get(col.CB,"NA"),
       IB:get(col.IB,"NA"),
-      UB=get(col.UB,"NA"),
+      UB: get(col.UB,"NA"),         // ← 修正：這裡本來是 UB=get(...)
       IncReg:get(col.IncReg,"NA"),
       IncNot:get(col.IncNot,"NA"),
       Pct:get(col.Pct,""),
@@ -837,12 +820,10 @@ async function loadCharacteristics(){
     };
   }).filter(Boolean);
 }
-
 function bindCharacteristicsControls(){
   $("#cha_search").addEventListener("input",e=>{ChaState.search=e.target.value.trim(); renderCharacteristicsTable();});
   $("#cha_sort").addEventListener("change",e=>{ChaState.sort=e.target.value; renderCharacteristicsTable();});
 }
-
 function filterCharacteristics(data){
   const qRaw = ChaState.search;
   if(!qRaw) return data;
@@ -852,14 +833,12 @@ function filterCharacteristics(data){
     return hay.includes(q);
   });
 }
-
 function sortCharacteristics(arr){
   if(ChaState.sort==="score"){
     const score=d=>["MB","CB","IB","UB","IncReg","IncNot"].reduce((s,k)=>s+(String(d[k]).toUpperCase()==="YES"?1:0),0);
     arr.sort((a,b)=>score(b)-score(a)||a.cn.localeCompare(b.cn));
   }else arr.sort((a,b)=>a.cn.localeCompare(b.cn));
 }
-
 function renderCharacteristicsTable(){
   const mount=$("#cha_mount"), empty=$("#cha_empty"), notice=$("#cha_notice");
   let data = filterCharacteristics(ChaState.raw.slice());
@@ -960,13 +939,15 @@ function ensureAIModal(){
 function collectVisibleTableData() {
   const table = document.querySelector(".matrix table");
   if (!table) return { columns: [], rows: [] };
+
   const columns = Array.from(table.querySelectorAll("thead th")).map(th => th.textContent.trim());
   const rows = Array.from(table.querySelectorAll("tbody tr")).map(tr => {
     const cells = Array.from(tr.querySelectorAll("td")).map(td => td.innerText.trim());
     const obj = {};
-    columns.forEach((col, i) => { obj[col] = cells[i] ?? ""; });
+    columns.forEach((col, i) => obj[col] = cells[i] ?? "");
     return obj;
   });
+
   return { columns, rows };
 }
 function computeYesShare(data) {
@@ -986,6 +967,7 @@ function computeYesShare(data) {
 function localSummarize(topic, data) {
   const { columns, rows } = data || {};
   if (!rows || !rows.length) return "<p>目前沒有可見的表格可整理。</p>";
+
   const pickRow = rows[0];
   const html = `
     <p><strong>概覽：</strong>此為本頁可見表格的快速整理。</p>
@@ -996,7 +978,7 @@ function localSummarize(topic, data) {
 }
 
 /* =================== 🤖 AI 對話頁 =================== */
-let CHAT_DATA = null; // {definitions:[], eligibility:[], reassessment:[], priority:[], characteristics:[]}
+let CHAT_DATA = null;
 
 async function loadAllDatasetsForChat(){
   if (CHAT_DATA) return CHAT_DATA;
@@ -1079,7 +1061,6 @@ async function loadAllDatasetsForChat(){
   CHAT_DATA = { definitions, eligibility, reassessment, priority, characteristics };
   return CHAT_DATA;
 }
-
 function renderAIChat(root){
   const sec = document.createElement("section");
   sec.id = "ai";
@@ -1114,7 +1095,6 @@ function renderAIChat(root){
     $("#aiQ").focus();
   });
 
-  // 預先載整庫（只載一次）
   loadAllDatasetsForChat().catch(()=>{});
 
   $("#aiSend").addEventListener("click", ()=> aiAsk());
@@ -1157,7 +1137,6 @@ function renderAIChat(root){
       setStatus("");
     }
   }
-
   function appendMsg(role, content, isHTML=false){
     const log=$("#aiLog");
     const item = document.createElement("div");
@@ -1177,7 +1156,7 @@ function renderAIChat(root){
   function setStatus(t){ const s=$("#aiStatus"); if(s) s.textContent = t||""; }
 }
 
-/* ====== AI 對話頁面樣式所需的最低限度容器 class（若已寫在 CSS 可忽略） ====== */
+/* ====== AI 對話頁面樣式最小補丁（如果 styles.css 已含，這段無影響） ====== */
 (function injectBasicAICSS(){
   if (document.getElementById("ai-inline-style")) return;
   const css = document.createElement("style");
