@@ -1,7 +1,6 @@
-
 /* =================== AI 開關與後端位址 =================== */
-const ENABLE_AI = true; // 要走真 AI（Cloudflare Worker）→ true；想先用本地規則摘要 → false
-const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 改成你的 Worker 網址
+const ENABLE_AI = true; // 真 AI（Cloudflare Worker）→ true；只用本地規則摘要 → false
+const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
 const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
@@ -59,7 +58,6 @@ function normSearch(s){
 /* =================== 路由 =================== */
 window.addEventListener("DOMContentLoaded", () => {
   ensureTopnavActive();
-  ensureAIModal();      // 若 HTML 沒放 Modal，這裡會自動注入
   renderRoute();
   window.addEventListener("hashchange", () => { ensureTopnavActive(); renderRoute(); });
 });
@@ -81,6 +79,7 @@ function renderRoute(){
   else if(hash.startsWith("/reassessment")) renderReassessment(main, getQueryParams(hash));
   else if(hash.startsWith("/priority"))     renderPriority(main, getQueryParams(hash));
   else if(hash.startsWith("/characteristics")) renderCharacteristics(main, getQueryParams(hash));
+  else if(hash.startsWith("/ai"))           renderAiPage(main);  // ← 新增 AI 對話路由
   else renderHome(main);
 }
 
@@ -97,11 +96,12 @@ function getQueryParams(hash){
 
 /* =================== 首頁 =================== */
 const TOPICS = [
-  { slug: "definitions",     emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異", available: true,  cta: "開始探索" },
-  { slug: "eligibility",     emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",   available: true,  cta: "查看矩陣" },
-  { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",         available: true,  cta: "查看頻率" },
-  { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",     available: true,  cta: "查看條件" },
-  { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",     available: true,  cta: "查看特徵" },
+  { slug: "definitions",     emoji: "🏘️", title: "各國社宅定義",     desc: "各國對 social housing 的稱呼與定義，比較差異",     available: true,  cta: "開始探索" },
+  { slug: "eligibility",     emoji: "🧾", title: "社宅申請資格",     desc: "誰能申請？收入門檻、公民/PR、在地居住等一覽",       available: true,  cta: "查看矩陣" },
+  { slug: "reassessment",    emoji: "🔄", title: "再審查頻率",       desc: "租戶多久需要重新審查？各國規定與備註",             available: true,  cta: "查看頻率" },
+  { slug: "priority",        emoji: "🎯", title: "優先分配條件",     desc: "等待名單、身心障礙、長者、族群等優先規則",           available: true,  cta: "查看條件" },
+  { slug: "characteristics", emoji: "🏷️", title: "社宅特徵",         desc: "定價方式 / 租金調整 / 相對市價％ / 購屋權",         available: true,  cta: "查看特徵" },
+  { slug: "ai",              emoji: "🤖", title: "AI 對話",           desc: "就資料庫問比較、是否存在、差異與國別摘要",           available: true,  cta: "開始對話" }, // ← 新增
 ];
 
 function renderHome(root){
@@ -160,7 +160,7 @@ async function renderDefinitions(root){
   await loadDefinitions();
   buildDefControls();
   renderDefCards();
-  injectAISummaryButton("definitions"); // 定義頁也能出摘要（以卡片資料概述）
+  // ← 這裡不再插任何「AI 摘要按鈕 / Modal」，改為每張卡片內自動顯示 AI 摘要
 }
 
 async function loadDefinitions(){
@@ -240,7 +240,7 @@ function renderDefCards(){
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
       </div>`).join("");
     return `
-      <article class="card ${multiple?"multiple":""}">
+      <article class="card ${multiple?"multiple":""}" data-country="${escapeHTML(d.Country)}">
         <div class="card-header">
           <div>
             <div class="country">${escapeHTML(d.Country)}</div>
@@ -248,6 +248,12 @@ function renderDefCards(){
           </div>
         </div>
         <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
+
+        <!-- 新增：AI 摘要（國家級） -->
+        <div class="ai-snippet" data-country="${escapeHTML(d.Country)}">
+          <em>AI 摘要生成中…</em>
+        </div>
+
         <div class="actions">
           <button class="btn toggle">展開全文</button>
           ${multiple?`<span class="badge">共 ${d.items.length} 個定義</span>`:""}
@@ -273,6 +279,77 @@ function renderDefCards(){
       btn.textContent = open ? "展開全文" : "收合全文";
     }
   };
+
+  // 生成所有卡片的 AI 摘要（懶載：進入視窗才跑）
+  lazyGenerateCountrySnippets();
+}
+
+/* === 定義頁：AI 國家摘要（卡片內） ===================== */
+function lazyGenerateCountrySnippets(){
+  const nodes = $$(".ai-snippet[data-country]");
+  if(!nodes.length) return;
+
+  const worker = async (el) => {
+    const country = el.getAttribute("data-country");
+    // 找到該國的完整定義文本（傳給 AI）
+    const record = DefState.data.find(d => d.Country === country);
+    const defs = (record?.items || []).map(x => ({
+      TermsUsed: x.TermsUsed,
+      Definition: x.Definition
+    }));
+
+    try{
+      const html = await summarizeCountryDefinition(country, defs);
+      el.innerHTML = html;
+    }catch(err){
+      el.innerHTML = `<span class="ai-error">AI 摘要失敗，已改用規則摘要。<br>${escapeHTML(localCountryDefinitionFallback(country, defs))}</span>`;
+    }
+  };
+
+  // 使用 IntersectionObserver 懶載，避免一次打爆 API
+  const io = new IntersectionObserver((entries)=>{
+    entries.forEach(e=>{
+      if(e.isIntersecting){
+        io.unobserve(e.target);
+        worker(e.target);
+      }
+    });
+  }, { rootMargin: "200px 0px" });
+
+  nodes.forEach(n => io.observe(n));
+}
+
+async function summarizeCountryDefinition(country, defs){
+  // 如果關閉真 AI，直接回傳本地規則摘要
+  if(!ENABLE_AI || !AI_API_BASE) return localCountryDefinitionFallback(country, defs);
+
+  // 嘗試呼叫你的 Worker（/api/report）
+  const payload = {
+    topic: "definitions",
+    mode: "country",
+    language: "zh-TW",
+    country,
+    context: { definitions: defs }
+  };
+
+  const res = await fetch(`${AI_API_BASE}/api/report`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  if(json?.ok && json?.html) return json.html;
+
+  // 若回傳非預期，退回本地規則
+  return localCountryDefinitionFallback(country, defs);
+}
+
+function localCountryDefinitionFallback(country, defs){
+  if(!defs || !defs.length) return `${country}：尚無定義資料。`;
+  const joined = defs.map((d,i)=>`#${i+1}【稱呼】${d.TermsUsed || "—"}；【定義】${shortText(d.Definition, 280)}`).join(" / ");
+  return `<strong>${escapeHTML(country)}</strong> 的社宅定義摘要：${escapeHTML(joined)}`;
 }
 
 /* =================== 申請資格 =================== */
@@ -315,7 +392,7 @@ async function renderEligibility(root){
   await loadEligibility();
   bindEligibilityControls();
   renderEligibilityView();
-  injectAISummaryButton("eligibility");
+  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadEligibility(){
@@ -471,7 +548,7 @@ async function renderReassessment(root, params={}){
   await loadReassessment();
   bindReassessmentControls();
   renderReassessmentTable();
-  injectAISummaryButton("reassessment");
+  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadReassessment(){
@@ -585,7 +662,7 @@ async function renderPriority(root, params={}){
   await loadPriority();
   bindPriorityControls();
   renderPriorityTable();
-  injectAISummaryButton("priority");
+  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadPriority(){
@@ -757,7 +834,7 @@ async function renderCharacteristics(root, params={}){
   }
 
   renderCharacteristicsTable();
-  injectAISummaryButton("characteristics");
+  // （已移除）不再於此頁插入任何 AI 摘要按鈕
 }
 
 async function loadCharacteristics(){
@@ -901,318 +978,122 @@ function pill(v){
   return `<span class="pill na">NA</span>`;
 }
 
-/* =================== AI Modal：若缺少就自動注入 =================== */
-function ensureAIModal(){
-  if (document.getElementById("ai-modal")) return;
-  const div = document.createElement("div");
-  div.id = "ai-modal";
-  div.className = "ai-modal";
-  div.style.display = "none";
-  div.innerHTML = `
-    <div class="ai-modal-content">
-      <div class="ai-modal-header">
-        <strong>AI Summary</strong>
-        <button id="ai-close" class="btn">✕</button>
+/* ============================================================
+   AI 對話頁（#/ai）
+   ============================================================ */
+async function renderAiPage(container) {
+  container.innerHTML = `
+    <section class="ai-page">
+      <div class="ai-hero">
+        <h2>🤖 AI 對話</h2>
+        <p class="muted">詢問關於本資料庫的開放式問題：比較、是否存在、摘要與差異等。</p>
       </div>
-      <div id="ai-body" class="ai-modal-body">Generating…</div>
-    </div>
+
+      <div class="ai-chat" id="aiChat">
+        <div class="chat-log" id="chatLog" aria-live="polite"></div>
+        <form id="chatForm" class="chat-form">
+          <input id="chatInput" type="text" placeholder="例如：兒少優先分配哪個國家設計較完整？" autocomplete="off" />
+          <button type="submit">送出</button>
+        </form>
+        <p class="tiny muted">提示：可問「X 項目哪個國家比較好？」、「A 與 B 是否都有 Y？」或「總結 C 國」。</p>
+      </div>
+    </section>
   `;
-  document.body.appendChild(div);
-}
 
-/* =================== 通用：收集表格資料 & YES 比例 =================== */
-function collectVisibleTableData() {
-  const table = document.querySelector(".matrix table");
-  if (!table) return { columns: [], rows: [] };
+  const chatLog = container.querySelector('#chatLog');
+  const form = container.querySelector('#chatForm');
+  const input = container.querySelector('#chatInput');
 
-  const columns = Array.from(table.querySelectorAll("thead th")).map(th => th.textContent.trim());
-  const rows = Array.from(table.querySelectorAll("tbody tr")).map(tr => {
-    const cells = Array.from(tr.querySelectorAll("td")).map(td => td.innerText.trim());
-    const obj = {};
-    columns.forEach((col, i) => obj[col] = cells[i] ?? "");
-    return obj;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+
+    appendChatBubble(chatLog, 'user', q);
+    input.value = '';
+    input.disabled = true;
+
+    try {
+      const answer = await aiQuery(q, {
+        // 提供 CSV 來源給後端（若後端需要自行擷取/聚合）
+        sources: {
+          definitions: CSV_DEFINITIONS,
+          eligibility: CSV_ELIGIBILITY,
+          reassessment: CSV_REASSESSMENT,
+          priority: CSV_PRIORITY,
+          characteristics: CSV_CHARACTERISTICS,
+        }
+      });
+      appendChatBubble(chatLog, 'assistant', answer || '（沒有取得回覆，請稍後再試）');
+    } catch (err) {
+      console.error(err);
+      appendChatBubble(chatLog, 'assistant', '抱歉，回覆失敗了。');
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
   });
-
-  return { columns, rows };
 }
 
-function computeYesShare(data) {
-  const stats = { yesShareByField: {} };
-  const rows = data.rows || [];
-  const cols = data.columns || [];
-  cols.forEach((col) => {
-    const vals = rows.map(r => String(r[col] || "").toUpperCase());
-    const yes = vals.filter(v => v.includes("YES")).length;
-    const yesNo = vals.filter(v => v.includes("YES") || v.includes("NO")).length;
-    if (yesNo > 0) stats.yesShareByField[col] = +(yes / yesNo).toFixed(2);
-  });
-  return stats;
+function appendChatBubble(root, role, text) {
+  const item = document.createElement('div');
+  item.className = `bubble ${role}`;
+  item.innerText = text;
+  root.appendChild(item);
+  root.scrollTop = root.scrollHeight;
 }
 
-/* =================== 本地規則摘要（零後端 fallback） =================== */
-function localSummarize(topic, data) {
-  const { columns, rows } = data || {};
-  if (!rows || !rows.length) return "<p>No visible data to summarize.</p>";
-
-  const params = new URLSearchParams((location.hash.split("?")[1] || ""));
-  const targetCountry = params.get("country");
-  const pickRow = targetCountry
-    ? rows.find(r => (r.Country || r["Country"] || "").toLowerCase().includes((targetCountry||"").toLowerCase())) || rows[0]
-    : rows[0];
-
-  const stats = computeYesShare(data);
-  const pctLine = Object.entries(stats.yesShareByField)
-    .filter(([k,v]) => v >= 0 && v <= 1)
-    .slice(0,3)
-    .map(([k,v]) => `${k}: ${(v*100).toFixed(0)}% YES`)
-    .join(" · ");
-
-  function pillify(v){ const t=String(v||"NA").toUpperCase(); return t==="YES"?"YES":(t==="NO"?"NO":"NA"); }
-
-  let html = "";
-  if (topic === "eligibility") {
-    const c = pickRow.Country || "This country";
-    const all = pillify(pickRow["All"]);
-    const inc = pillify(pickRow["Income"] || pickRow["Income threshold"]);
-    const pr  = pillify(pickRow["Citizenship/PR"] || pickRow["Citizenship / Perm. Residency"]);
-    const res = pillify(pickRow["Residency"] || pickRow["Local residency"]);
-    const emp = pillify(pickRow["Employment"]);
-    const note= pickRow["Notes"] || pickRow["Other"] || "";
-
-    html = `
-      <p><strong>Overview.</strong> Who can access social rental housing and typical gatekeeping criteria.</p>
-      <ul>
-        <li><strong>${c}</strong>: All-eligible=${all}, Income=${inc}, Citizenship/PR=${pr}, Residency=${res}, Employment=${emp}.</li>
-        <li>Across the dataset → ${pctLine || "mixed/insufficient for a clear pattern"}.</li>
-        <li>${note ? ("Note: " + note) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "priority") {
-    const c = pickRow.Country || "This country";
-    const fields = ["Waiting list","Income","Disability","Elderly","Asylum seekers","Ethnic minority","Household size","Current housing"];
-    const bullets = fields.filter(f => f in pickRow).map(f => `${f}=${pillify(pickRow[f])}`).join(", ");
-    html = `
-      <p><strong>Overview.</strong> Which applicant groups receive priority in allocation.</p>
-      <ul>
-        <li><strong>${c}</strong> priority flags → ${bullets || "—"}.</li>
-        <li>Typical cross-country patterns: ${pctLine || "varied with no dominant pattern"}.</li>
-        <li>${pickRow["Notes"] ? ("Notes: " + pickRow["Notes"]) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "reassessment") {
-    const c = pickRow.Country || "This country";
-    const freq = pickRow["Frequency"] || pickRow["Standardized frequency"] || "—";
-    const seg  = pickRow["Segment"] || "—";
-    const det  = pickRow["Detail"] || pickRow["Notes"] || "—";
-    html = `
-      <p><strong>Overview.</strong> How often tenant eligibility is reviewed.</p>
-      <ul>
-        <li><strong>${c}</strong>: Frequency=<strong>${freq}</strong>${seg && seg!=="—" ? ` (segment: ${seg})` : ""}.</li>
-        <li>${det && det !== "—" ? ("Detail: " + det) : "No additional details provided."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else if (topic === "characteristics") {
-    const c = pickRow.Country || "This country";
-    const mb = pillify(pickRow["Market-based"]);
-    const cb = pillify(pickRow["Cost-based"]);
-    const ib = pillify(pickRow["Income-based"]);
-    const ub = pillify(pickRow["Utility-based"]);
-    const rr = pillify(pickRow["Rent ↑ regular"]);
-    const rn = pillify(pickRow["Rent ↑ not regular"]);
-    const pct= (pickRow["Social rent % of market"] || "").trim() || "—";
-    const buy= (pickRow["Sitting tenant right to buy"] || "").trim() || "—";
-    const note= pickRow["Notes"] || "—";
-    html = `
-      <p><strong>Overview.</strong> Pricing logic, rent adjustment, and tenant purchase rights.</p>
-      <ul>
-        <li><strong>${c}</strong>: Market=${mb}, Cost=${cb}, Income=${ib}, Utility=${ub}.</li>
-        <li>Rent increases: Regular=${rr}, Not regular=${rn}; Social rent ≈ ${pct} of market; Right-to-buy: ${buy}.</li>
-        <li>${note !== "—" ? ("Notes: " + note) : "No additional notes reported."}</li>
-      </ul>
-      <p>Source: OECD AHD (displayed fields).</p>
-    `;
-  } else {
-    html = `<p>This page can be summarized when a matrix table is visible.</p>`;
-  }
-  return html;
-}
-
-/* =================== AI 摘要按鈕注入 =================== */
-function injectAISummaryButton(topic){
-  if (document.getElementById("ai-gen")) return; // 避免重複插入
-  const bar = document.createElement("div");
-  bar.style.display = "flex";
-  bar.style.justifyContent = "flex-end";
-  bar.style.gap = "8px";
-  bar.style.margin = "10px 0 0";
-  bar.innerHTML = `<button id="ai-gen" class="btn">🧠 Generate summary</button>`;
-  const container = document.querySelector(".controls") || document.querySelector(".actions") || document.body;
-  container.appendChild(bar);
-
-  const modal = document.getElementById("ai-modal");
-  const modalBody = document.getElementById("ai-body");
-  const closeBtn = document.getElementById("ai-close");
-  if (closeBtn) closeBtn.onclick = () => (modal.style.display = "none");
-
-  document.getElementById("ai-gen").onclick = async () => {
-    const data = collectVisibleTableData();
-    if (!data.rows.length) {
-      if (modalBody) modalBody.innerHTML = "No visible table to summarize.";
-      if (modal) modal.style.display = "flex";
-      return;
-    }
-
-    if (ENABLE_AI && AI_API_BASE) {
-      try {
-        // 推測當前 country 參數（若有）
-        const params = new URLSearchParams((location.hash.split("?")[1] || ""));
-        const country = params.get("country") || "";
-        const payload = {
-          topic, mode: "page", language: "en",
-          filters: { country, search: "", sort: "" },
-          data: { ...data, stats: computeYesShare(data) }
-        };
-
-        if (modalBody) modalBody.innerHTML = "Generating…";
-        if (modal) modal.style.display = "flex";
-
-        const resp = await fetch(`${AI_API_BASE}/api/report`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const json = await resp.json();
-        if (!json.ok) throw new Error(json.error || "Failed");
-        if (modalBody) modalBody.innerHTML = json.html;
-      } catch (e) {
-        if (modalBody) modalBody.innerHTML = `⚠️ Failed to generate. ${escapeHTML(e.message)}`;
-        if (modal) modal.style.display = "flex";
-      }
-    } else {
-      const html = localSummarize(topic, data);
-      if (modalBody) modalBody.innerHTML = html;
-      if (modal) modal.style.display = "flex";
-    }
-  };
-}
-
-// --- 覆蓋版：先移除舊按鈕，找不到容器就插到 body 也要顯示 ---
-function injectAISummaryButton(topic){
-  // 先移除殘留的舊按鈕，避免路由切換後 id 已存在
-  const old = document.getElementById("ai-gen");
-  if (old && old.parentElement) old.parentElement.removeChild(old);
-
-  // 找容器：優先 .controls -> .actions -> .home-hero -> 有表格的父層 -> body
-  let container =
-    document.querySelector(".controls") ||
-    document.querySelector(".actions") ||
-    document.querySelector(".home-hero") ||
-    (document.querySelector(".matrix") ? document.querySelector(".matrix").parentElement : null) ||
-    document.body;
-
-  // 建立按鈕列
-  const bar = document.createElement("div");
-  bar.style.display = "flex";
-  bar.style.justifyContent = "flex-end";
-  bar.style.gap = "8px";
-  bar.style.margin = "10px 0 0";
-  bar.innerHTML = `<button id="ai-gen" class="btn">🧠 Generate summary</button>`;
-  container.appendChild(bar);
-
-  // 確保 Modal 存在
-  ensureAIModal();
-  const modal = document.getElementById("ai-modal");
-  const modalBody = document.getElementById("ai-body");
-  const closeBtn = document.getElementById("ai-close");
-  if (closeBtn) closeBtn.onclick = () => (modal.style.display = "none");
-
-  document.getElementById("ai-gen").onclick = async () => {
-    const data = collectVisibleTableData();
-    if (!data.rows.length) {
-      if (modalBody) modalBody.innerHTML = "No visible table to summarize.";
-      if (modal) modal.style.display = "flex";
-      return;
-    }
-
-    // 自動帶入 URL 裡的 country（若有）
-    const params = new URLSearchParams((location.hash.split("?")[1] || ""));
-    const country = params.get("country") || "";
-
-    if (ENABLE_AI && AI_API_BASE) {
-      try {
-        const payload = {
-          topic, mode: "page", language: "en",
-          filters: { country, search: "", sort: "" },
-          data: { ...data, stats: computeYesShare(data) }
-        };
-        if (modalBody) modalBody.innerHTML = "Generating…";
-        if (modal) modal.style.display = "flex";
-
-        const resp = await fetch(`${AI_API_BASE}/api/report`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        const json = await resp.json();
-        if (!json.ok) throw new Error(json.error || "Failed");
-        if (modalBody) modalBody.innerHTML = json.html;
-      } catch (e) {
-        if (modalBody) modalBody.innerHTML = `⚠️ Failed to generate. ${e.message}`;
-        if (modal) modal.style.display = "flex";
-      }
-    } else {
-      const html = localSummarize(topic, data);
-      if (modalBody) modalBody.innerHTML = html;
-      if (modal) modal.style.display = "flex";
-    }
-  };
-}
-// --- 路由後保險：只要看到表格或控制列，就硬插一顆按鈕 ---
-(function ensureAIButtonAfterRoute(){
-  // 當前主題推斷
-  function currentTopic(){
-    const h = (location.hash || "#/").replace(/^#\//,"").split("?")[0];
-    if (h === "eligibility") return "eligibility";
-    if (h === "reassessment") return "reassessment";
-    if (h === "priority") return "priority";
-    if (h === "characteristics") return "characteristics";
-    if (h === "definitions") return "definitions";
-    return null;
+async function aiQuery(question, context) {
+  if (!ENABLE_AI || !AI_API_BASE) {
+    // 開發模式：簡單 Mock
+    return mockAnswer(question);
   }
 
-  // 觀察 DOM 變化（頁面剛渲染完會觸發）
-  const obs = new MutationObserver(() => {
-    const topic = currentTopic();
-    const hasTable = !!document.querySelector(".matrix table");
-    const hasControls = !!document.querySelector(".controls, .actions, .home-hero");
-    const hasButton = !!document.getElementById("ai-gen");
-
-    // 在主題頁、且尚未有按鈕、且有控制列或表格時插入
-    if (topic && !hasButton && (hasControls || hasTable)) {
-      injectAISummaryButton(topic);
+  // 優先嘗試 /api/chat；失敗再試 /api/report（兼容你的 Worker）
+  try {
+    const res = await fetch(`${AI_API_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ question, context, language: "zh-TW" })
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.ok && json?.answer) return json.answer;
     }
+  } catch(_) {}
+
+  // 退回 /api/report（mode: chat）
+  const res2 = await fetch(`${AI_API_BASE}/api/report`, {
+    method: "POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify({ topic:"chat", mode:"free", question, language:"zh-TW", context })
   });
+  if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+  const json2 = await res2.json();
+  if (json2?.ok && (json2.answer || json2.html)) return (json2.answer || stripHtml(json2.html));
+  return "（AI 沒有回傳有效內容）";
+}
 
-  obs.observe(document.body, { childList: true, subtree: true });
+function stripHtml(html){
+  const div = document.createElement("div");
+  div.innerHTML = html || "";
+  return div.innerText.trim();
+}
 
-  // 初次載入也試一次
-  window.addEventListener("hashchange", () => {
-    // hash 改變時，稍微等內容 render 再插
-    setTimeout(() => {
-      const topic = currentTopic();
-      const hasButton = !!document.getElementById("ai-gen");
-      if (topic && !hasButton) injectAISummaryButton(topic);
-    }, 50);
-  });
+function mockAnswer(q){
+  const lq = q.toLowerCase();
+  if(lq.includes("哪個國家") && lq.includes("比較好")) return "示例：若以「可近性 + 租金負擔」綜合評估，A 國與 B 國表現相對較佳（開發中，待真實資料接上）。";
+  if(lq.includes("是否都有")) return "示例：A 國與 B 國在「租金補貼」皆有設計，但細節門檻不同（開發中）。";
+  if(lq.includes("總結") || lq.includes("摘要")) return "示例：C 國社宅聚焦於弱勢戶優先、租金管制與再審查，每 X 年檢核一次（開發中）。";
+  return "我可以幫你比較項目、檢查是否存在，或總結特定國家；請再換個說法試試！";
+}
 
-  // 極簡：首次進站延遲插入（避免你用的 render 是異步）
-  setTimeout(() => {
-    const topic = currentTopic();
-    const hasButton = !!document.getElementById("ai-gen");
-    if (topic && !hasButton) injectAISummaryButton(topic);
-  }, 100);
-})();
-
+/* ======= （移除）舊的 AI Modal / 按鈕 / 頁面摘要機制 =========
+   - ensureAIModal()
+   - collectVisibleTableData()
+   - computeYesShare()
+   - localSummarize()
+   - injectAISummaryButton()
+   - ensureAIButtonAfterRoute()
+   以上全部已刪除，以符合「四頁移除 AI 摘要、定義頁改為卡片內摘要、AI 另設對話頁」的需求。
+   ============================================================ */
