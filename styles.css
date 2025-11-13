@@ -313,4 +313,35 @@ section{
 .link-row .btn{
   white-space: nowrap !important;
 }
+/* ===== HOTFIX: 定義卡片右側超出修復 ===== */
+
+/* 1) 保證卡片與網格不會超出容器 */
+.cards{ max-width:100% !important; overflow-x:hidden !important; }
+.cards .card{ max-width:100% !important; min-width:0 !important; }
+
+/* 2) flex 內層（標題/用語區）允許縮小，否則長字會把容器撐寬 */
+.def-card .card-header > *{ min-width:0 !important; }
+
+/* 3) 長字串全部允許斷行；任何語言都能在任意位置換行 */
+.def-card .summary,
+.def-card .terms,
+.def-card .variant-body,
+.def-card .fulltext,
+.def-card .chips,
+.def-card .actions,
+.def-card .link-row {
+  overflow-wrap:anywhere !important; /* 現代瀏覽器最佳 */
+  word-break:break-word !important;   /* 後備保險 */
+}
+
+/* 4) 展開全文的內容區也避免水平捲動 */
+.def-card .fulltext{ overflow-x:hidden !important; }
+
+/* 5) 底部連結列保持同一行，但若內容太長仍不撐寬卡片 */
+.def-card .link-row{
+  flex-wrap:nowrap !important;
+  overflow-x:auto !important;      /* 需要時可左右滑動 */
+  -webkit-overflow-scrolling:touch;
+}
+.def-card .link-row .btn{ white-space:nowrap !important; }
 
