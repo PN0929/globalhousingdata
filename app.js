@@ -3,7 +3,7 @@ const ENABLE_AI = true;
 const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev";
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
-const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/3c9bdf0d7ad4bd2cc65b670a45ddc99ffc0d3de9/data/social_housing_definitions_clean_utf8.csv";
+const CSV_DEFINITIONS     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_housing_definitions_clean_utf8.csv";
 const CSV_ELIGIBILITY     = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_eligibility_clean_utf8.csv";
 const CSV_REASSESSMENT    = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_housing_reassessment_clean_utf8.csv";
 const CSV_PRIORITY        = "https://raw.githubusercontent.com/PN0929/globalhousingdata/main/data/social_rental_priority_allocation_clean_utf8.csv";
@@ -811,7 +811,7 @@ async function loadCharacteristics(){
       MB:get(col.MB,"NA"),
       CB:get(col.CB,"NA"),
       IB:get(col.IB,"NA"),
-      UB: get(col.UB,"NA"),         // ← 修正：這裡本來是 UB=get(...)
+      UB:get(col.UB,"NA"),
       IncReg:get(col.IncReg,"NA"),
       IncNot:get(col.IncNot,"NA"),
       Pct:get(col.Pct,""),
@@ -1084,9 +1084,8 @@ function renderAIChat(root){
 
   const tips = [
     "請幫我總結 荷蘭 的社宅定義與重點制度。",
-    "日本 與 德國 在「優先分配」是否都有針對長者？",
-    "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
-    "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+    "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
+    "日本 和 韓國 的申請資格差異為何？請用表格列點。"
   ];
   $("#aiQuick").innerHTML = tips.map(t=>`<button class="chip" data-q="${escapeHTML(t)}">${escapeHTML(t)}</button>`).join("");
   $("#aiQuick").addEventListener("click", (e)=>{
