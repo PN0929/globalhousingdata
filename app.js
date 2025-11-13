@@ -227,53 +227,87 @@ function applyDefFilters(){
   renderDefCards();
 }
 
+// 判斷卡片內容是否「長」，長才需要「展開全文」
+function isLongDefinition(group){
+  if (!group || !group.items || !group.items.length) return false;
+  const first = group.items[0]?.Definition || "";
+  const totalLen = group.items.reduce((s,it)=>s + (it.Definition?.length || 0), 0);
+  // 規則：第一則超過 280 字，或全部合計 > 500，或同國家定義超過 2 則 → 才顯示展開
+  return (first.length > 280) || (totalLen > 500) || (group.items.length > 2);
+}
+
 function renderDefCards(){
   const wrap=$("#def_cards"), empty=$("#def_empty");
   if(!DefState.filtered.length){wrap.innerHTML="";empty.style.display="block";return;}
   empty.style.display="none";
+
   wrap.innerHTML = DefState.filtered.map((d)=>{
-    const chips = TAG_RULES.filter(t=>d.flagsCombined[t.key]).slice(0,3).map(t=>`<span class="chip">${t.label}</span>`).join("");
-    const variants = d.items.map((it,i)=>`
+    const chips = TAG_RULES
+      .filter(t=>d.flagsCombined[t.key])
+      .slice(0,3)
+      .map(t=>`<span class="chip">${t.label}</span>`)
+      .join("");
+
+    const firstDef = d.items[0]?.Definition || "";
+    const showExpand = isLongDefinition(d);
+
+    // 摘要文字：長卡顯示短摘，短卡直接顯示全文（第一筆）
+    const summaryHTML = showExpand
+      ? escapeHTML(shortText(firstDef, 260))
+      : escapeHTML(firstDef);
+
+    // variant 區塊（只有長卡才插入，含所有定義）
+    const variants = showExpand ? d.items.map((it,i)=>`
       <div class="variant">
         <div class="variant-header"><span class="vindex">#${i+1}</span>${escapeHTML(it.TermsUsed || "—")}</div>
         <div class="variant-body">${escapeHTML(it.Definition)}</div>
-      </div>`).join("");
+      </div>
+    `).join("") : "";
+
     return `
-      <article class="card">
+      <article class="card def-card">
         <div class="card-header">
           <div>
             <div class="country">${escapeHTML(d.Country)}</div>
             <div class="terms">${escapeHTML(d.termsJoined || (d.items[0]?.TermsUsed || "—"))}</div>
           </div>
-          <div class="actions" style="margin-top:-2px;">
-            <button class="btn ai-summary" data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
-          </div>
         </div>
-        <div class="summary">${escapeHTML(d.items[0]?.short || "")}</div>
+
+        <div class="summary">${summaryHTML}</div>
+
         <div class="actions">
           <div class="chips">${chips}</div>
         </div>
-        <div class="fulltext" style="display:none;">${variants}</div>
-        <div class="actions" style="margin-top:8px">
-          <button class="btn toggle">展開全文</button>
+
+        ${showExpand ? `
+          <div class="actions">
+            <button class="btn toggle">展開全文</button>
+          </div>
+          <div class="fulltext" style="display:none;">${variants}</div>
+        ` : ""}
+
+        <div class="actions link-row nowrap">
           <a class="btn" href="#/eligibility">→ 申請資格</a>
           <a class="btn" href="#/reassessment?country=${countryParam(d.Country)}">→ 再審查頻率</a>
           <a class="btn" href="#/priority?country=${countryParam(d.Country)}">→ 優先分配</a>
           <a class="btn" href="#/characteristics?country=${countryParam(d.Country)}">→ 社宅特徵</a>
         </div>
+
+        <div class="ai-row">
+          <button class="btn primary ai-summary" data-country="${escapeHTML(d.Country)}">⚡ 產生 AI 摘要</button>
+        </div>
       </article>`;
   }).join("");
 
-  // 展開/收合全文
+  // 只有存在 .toggle 才需要綁定展開事件（長卡）
   wrap.onclick = (e)=>{
     const btn = e.target.closest(".toggle");
-    if(btn){
-      const card = e.target.closest(".card");
-      const full = $(".fulltext",card);
-      const open = full.style.display!=="none";
-      full.style.display = open ? "none":"block";
-      btn.textContent = open ? "展開全文" : "收合全文";
-    }
+    if(!btn) return;
+    const card = e.target.closest(".card");
+    const full = $(".fulltext",card);
+    const open = full.style.display!=="none";
+    full.style.display = open ? "none":"block";
+    btn.textContent = open ? "展開全文" : "收合全文";
   };
 
   // 綁定 country 卡片上的「⚡ 產生 AI 摘要」
@@ -1000,15 +1034,14 @@ function renderAIChat(root){
     <div class="ai-quick" id="aiQuickRow">
       ${[
         "請幫我總結 荷蘭 的社宅定義與重點制度。",
-        "日本 與 德國 在「優先分配」是否都有針對長者？",
-        "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
-        "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+        "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
+        "日本 和 韓國 的申請資格差異為何？請用表格列點。"
       ].map(q=>`<button class="chip" data-q="${escapeHTML(q)}">${escapeHTML(q)}</button>`).join("")}
     </div>
 
     <!-- 2) 輸入框 -->
     <div class="ai-input">
-      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與再審查差異」"></textarea>
+      <textarea id="aiInput" placeholder="輸入你的問題，例如：\n「請比較 英國 與 德國 的社宅定價邏輯與資格審查的差異」"></textarea>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button id="aiSend"   class="btn primary">送出</button>
         <button id="aiHealth" class="btn">測試連線</button>
