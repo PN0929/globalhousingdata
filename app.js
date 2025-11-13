@@ -1,5 +1,5 @@
 /* =================== AI 開關與後端位址 =================== */
-const ENABLE_AI = true; // 要走真 AI（Cloudflare Worker）→ true；想先用本地規則摘要 → false
+const ENABLE_AI = true; // 走真 AI（Cloudflare Worker）→ true；本地規則摘要 → false
 const AI_API_BASE = "https://restless-glade-9412.peienli-tw.workers.dev"; // ← 你的 Worker 網址
 
 /* =================== 資料路徑（GitHub Raw CSV） =================== */
@@ -210,7 +210,7 @@ async function loadDefinitions(){
 }
 
 function buildDefControls(){
-  const countries = Array.from(new Set(DefState.data.map(d=>d.C ountry))).sort((a,b)=>a.localeCompare(b));
+  const countries = Array.from(new Set(DefState.data.map(d=>d.Country))).sort((a,b)=>a.localeCompare(b));
   $("#def_country").innerHTML = `<option value="ALL">全部國家</option>` + countries.map(c=>`<option>${escapeHTML(c)}</option>`).join("");
   $("#def_country").addEventListener("change",e=>{DefState.selectedCountry=e.target.value;applyDefFilters();});
   $("#def_search").addEventListener("input",e=>{DefState.searchText=e.target.value.trim();applyDefFilters();});
@@ -297,7 +297,6 @@ function renderDefCards(){
 
   // 卡片上的 AI 摘要按鈕（點擊才呼叫 API）
   wrap.querySelectorAll(".ai-sum").forEach(btn=>{
- Kling
     btn.addEventListener("click", async ()=>{
       const country = btn.getAttribute("data-country") || "";
       const card = btn.closest(".card");
@@ -314,9 +313,7 @@ async function generateCardAISummary(cardEl, country){
   if (modal) modal.style.display = "flex";
 
   try{
-    // 嘗試抓取四個主題表的可視資料（若該頁不在，也取不到沒關係）
-    // 這裡先以當前頁的可視表為主，若要更完整可額外 fetch 其它 CSV，但為省 API 費用就取可視表。
-    const data = collectVisibleTableData();
+    const data = collectVisibleTableData(); // 以可視表為主，省 API 費用
     const payload = {
       topic: "definitions",
       mode: "card",
@@ -751,7 +748,7 @@ function renderPriorityTable(){
         <tbody>
           ${data.map(d=>`
             <tr>
-              <td class="flag"><strong>${escapeHTML(d.c)}</strong></td>
+              <td class="flag"><strong>${escapeHTML(cleanCountryName(d.c)))}</strong></td>
               <td>${pill(d.Wait)}</td>
               <td>${pill(d.Income)}</td>
               <td>${pill(d.Dis)}</td>
