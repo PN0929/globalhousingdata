@@ -978,7 +978,7 @@ function pill(v){
 }
 
 /* ============================================================
-   AI 對話頁（#/ai）— 大輸入框 + 真實國名提示 + 可點示例
+   AI 對話頁（#/ai）— 先「快速提問」→「輸入框」→「聊天紀錄」
    ============================================================ */
 async function renderAiPage(container) {
   const COUNTRIES = ["台灣","日本","韓國","德國","法國","荷蘭","英國","瑞典","加拿大","澳洲","紐西蘭","美國","義大利","西班牙","挪威","丹麥","芬蘭"];
@@ -998,21 +998,25 @@ async function renderAiPage(container) {
       </div>
 
       <div class="ai-chat" id="aiChat">
+        <!-- 1) 快速提問 -->
         <div class="ai-hint">
           <div class="hint-title">快速提問（點一下即可帶入輸入框）</div>
           <div class="ai-suggest" id="aiSuggest"></div>
         </div>
 
-        <div class="chat-log" id="chatLog" aria-live="polite"></div>
-
+        <!-- 2) 輸入框（送出後才會顯示下方聊天紀錄） -->
         <form id="chatForm" class="chat-form">
           <textarea id="chatInput" placeholder="輸入你的問題，例如：\n- ${EXAMPLES[0]}\n- ${EXAMPLES[1]}"></textarea>
           <button type="submit" class="btn primary">送出</button>
         </form>
+
+        <!-- 3) 聊天紀錄（空的時候會被 CSS 隱藏） -->
+        <div class="chat-log" id="chatLog" aria-live="polite"></div>
       </div>
     </section>
   `;
 
+  // 渲染可點示例
   const suggest = container.querySelector('#aiSuggest');
   suggest.innerHTML = EXAMPLES.map(q => `<span class="suggest-pill" data-q="${escapeHTML(q)}">${escapeHTML(q)}</span>`).join("");
   suggest.addEventListener('click', (e) => {
