@@ -151,16 +151,28 @@ footer{margin-top:22px;text-align:center;color:var(--muted);font-size:13px}
 }
 .ai-title{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;margin-bottom:6px}
 .ai-sub{color:var(--ink-2);font-size:13.5px;margin-bottom:12px}
-.ai-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
-.ai-quick .chip{cursor:pointer}
-.ai-input{display:flex;gap:8px;align-items:flex-start;margin:8px 0}
-.ai-input textarea{
-  flex:1;min-height:106px;border:1.5px solid var(--line);border-radius:12px;padding:12px;font-size:15px;resize:vertical
+
+/* 快速提問（可點膠囊） */
+.ai-quick{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 10px}
+.ai-quick .chip{
+  display:inline-block;background:var(--brand-50);border:1px solid rgba(14,165,165,.35);
+  color:#0b8d8d;font-weight:600;border-radius:999px;padding:6px 10px;font-size:12.5px;
+  cursor:pointer;transition:.16s
 }
-.ai-input textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(14,165,165,.12);outline:none}
+.ai-quick .chip:hover{ border-color:var(--brand); box-shadow:0 0 0 3px rgba(14,165,165,.14) }
+
+/* 輸入列（大輸入框） */
+.ai-input{display:flex;gap:8px;align-items:flex-start;margin:8px 0 6px}
+.ai-input textarea{
+  flex:1; min-height:140px;
+  border:1.5px solid var(--line);border-radius:12px;padding:12px;font-size:15px;resize:vertical;outline:none
+}
+.ai-input textarea:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(14,165,165,.12)}
 .ai-input .btn{height:42px;padding:0 14px}
+
+/* 聊天紀錄容器 */
 .ai-chat-log{
-  background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;max-height:520px;overflow:auto
+  background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:8px;max-height:520px;overflow:auto
 }
 .ai-msg{display:flex;gap:10px;margin:10px 0}
 .ai-msg .who{
@@ -175,6 +187,14 @@ footer{margin-top:22px;text-align:center;color:var(--muted);font-size:13px}
 .ai-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
 .ai-actions .status{color:var(--muted);font-size:12px}
 
+/* 讓 AI 產出的段落/列表好讀（AI 對話與 Modal 都生效） */
+.ai-chat-log p,
+#ai-body p { margin:0 0 10px; line-height:1.75; }
+.ai-chat-log ul,
+#ai-body ul { margin:0 0 10px; padding-left:20px; }
+.ai-chat-log li,
+#ai-body li { margin:4px 0; }
+
 /* AI Modal（卡片摘要） */
 .ai-modal{
   position:fixed; inset:0; display:none; align-items:center; justify-content:center;
@@ -186,19 +206,3 @@ footer{margin-top:22px;text-align:center;color:var(--muted);font-size:13px}
 }
 .ai-modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .ai-modal-body{max-height:70dvh;overflow:auto}
-
-/* ==== AI 回覆的閱讀性優化（AI 對話 與 AI 摘要） ==== */
-.ai-chat-log p,
-#ai-body p {
-  margin: 0 0 10px;
-  line-height: 1.75;
-}
-.ai-chat-log ul,
-#ai-body ul {
-  margin: 0 0 10px;
-  padding-left: 20px;
-}
-.ai-chat-log li,
-#ai-body li {
-  margin: 4px 0;
-}
