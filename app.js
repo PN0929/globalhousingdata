@@ -95,9 +95,10 @@ function renderRoute(){
 }
 
 function getQueryParams(hash){
-  const qIndex = hash.indexOf("?"); const out = {};
+  const qIndex = hash.indexOf("?");
+  const out = {};
   if(qIndex === -1) return out;
-  const q = hash.slice(1 + qIndex);
+  const q = hash.slice(qIndex+1);
   q.split("&").forEach(kv=>{
     const [k,v] = kv.split("=");
     out[decodeURIComponent(k||"")] = decodeURIComponent((v||"").replace(/\+/g," "));
@@ -1118,15 +1119,14 @@ function renderAIChat(root){
       <div class="ai-chat-log" id="aiLog"></div>
       <div class="ai-actions"><span id="aiStatus" class="status"></span></div>
     </div>
-  ";
+  `;
   root.appendChild(sec);
 
   // 快速提問
   const tips = [
     "請幫我總結 荷蘭 的社宅定義與重點制度。",
-    "日本 與 德國 在「優先分配」是否都有針對長者？",
-    "哪個國家在「社宅租金占市場租金％」的數值較低？請列出前 3 名與理由。",
-    "台灣 和 韓國 的申請資格差異為何？請用表格列點。"
+    "澳洲 與 紐西蘭 在「優先分配」是否都有針對長者？",
+    "日本 和 韓國 的申請資格差異為何？請用表格列點。"
   ];
   $("#aiQuick").innerHTML = tips.map(t=>`<button class="chip" data-q="${escapeHTML(t)}">${escapeHTML(t)}</button>`).join("");
   $("#aiQuick").addEventListener("click", (e)=>{
