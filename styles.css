@@ -344,4 +344,25 @@ section{
   -webkit-overflow-scrolling:touch;
 }
 .def-card .link-row .btn{ white-space:nowrap !important; }
+/* === HOTFIX: 定義卡片底部四個連結分兩行（每行兩顆） === */
+.def-card .link-row{
+  display:flex !important;
+  flex-wrap:wrap !important;     /* 允許換行 */
+  gap:8px !important;
+  overflow:visible !important;   /* 不要出現橫向卷軸 */
+  padding-bottom:0 !important;
+}
 
+.def-card .link-row .btn{
+  flex:1 1 calc(50% - 8px) !important;  /* 每行兩顆，平均寬 */
+  white-space:nowrap !important;        /* 文字本身不斷詞 */
+  text-align:center !important;
+}
+
+/* 超窄螢幕時保險：若四顆塞不下，仍會斷到兩行，但不會把卡片撐寬 */
+@media (max-width: 360px){
+  .def-card .link-row .btn{
+    flex:1 1 100% !important; /* 每顆獨佔一行（最保險） */
+  }
+}
+.def-card .link-row { row-gap: 10px !important; }
